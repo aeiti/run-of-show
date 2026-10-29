@@ -1,25 +1,27 @@
 import datetime
+from decimal import Decimal
 
 from django.contrib.auth import get_user_model
 from django.core.management.base import BaseCommand
 from rest_framework.authtoken.models import Token
 
-from shows.models import Cue, Production
+from shows.models import Cue, Production, Run
 
 DEMO_USERNAME = "demo"
 DEMO_PASSWORD = "curtain-up"  # local demo only
 
+# (number, label, page, scene, notes)
 CUES = [
-    ("1", "Preshow / house to half", 1),
-    ("2", "House out", 1),
-    ("5", "Lights up: lighthouse interior, dawn", 2),
-    ("10", "Storm builds upstage", 7),
-    ("12", "Lightning", 8),
-    ("12.5", "Lightning follow", 8),
-    ("20", "Lamp room: beam sweep", 14),
-    ("30", "Blackout", 21),
-    ("31", "Bows", 22),
-    ("32", "House up", 22),
+    ("1", "Preshow / house to half", 1, "Preshow", ""),
+    ("2", "House out", 1, "", "Wait for house manager's clearance"),
+    ("5", "Lights up: lighthouse interior, dawn", 2, "1.1 The Lamp Room", ""),
+    ("10", "Storm builds upstage", 7, "", ""),
+    ("12", "Lightning", 8, "", "On the thunder sound cue, not the line"),
+    ("12.5", "Lightning follow", 8, "", ""),
+    ("20", "Lamp room: beam sweep", 14, "1.2 The Wreck", ""),
+    ("30", "Blackout", 21, "", ""),
+    ("31", "Bows", 22, "Curtain call", ""),
+    ("32", "House up", 22, "", ""),
 ]
 
 
@@ -41,9 +43,10 @@ class Command(BaseCommand):
         )
         if not production.cues.exists():
             Cue.objects.bulk_create(
-                Cue(production=production, number=n, label=label, page=page, order=i)
-                for i, (n, label, page) in enumerate(CUES)
+                Cue(production=production, number=Decimal(n), label=label, page=page, scene=scene, notes=notes)
+                for n, label, page, scene, notes in CUES
             )
+        Run.objects.get_or_create(production=production, label="Run 1")
 
         self.stdout.write(
             self.style.SUCCESS(

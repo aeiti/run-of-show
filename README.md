@@ -53,35 +53,42 @@ cd backend
 
 ## Backend
 
-Three models in `backend/shows/models.py`, all registered in the Django admin:
+Four models in `backend/shows/models.py`, all registered in the Django admin:
 
-- `Production`: owner, name, venue, performance date
-- `Cue`: number (a string, so `12.5` works), label, script page, order within the production
-- `CueEvent`: one firing of a cue, with run label (for example "Preview 1"), timestamp, and note
+- `Production`: owner, name, company, venue, performance date, notes
+- `Cue`: number (a decimal, so `12.5` sorts between `12` and `13`), label, script page, notes, scene. Cues are always ordered by number.
+- `Run`: one rehearsal or performance of a production (label such as "Preview 1", kind, start and end)
+- `CueEvent`: one operator action in a run (GO, BACK, GOTO or RESET), with the cue it made active and a timestamp
 
-The schema is in the committed migration `backend/shows/migrations/0001_initial.py`.
+The schema is in the committed migrations in `backend/shows/migrations/`. `0003` is a data migration that moved the original free-text run labels into `Run` rows.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `POST` | `/api/auth/token/` | Exchange username and password for an API token |
 | `GET` `POST` | `/api/productions/` | List or create your productions |
 | `GET` `PUT` `PATCH` `DELETE` | `/api/productions/{id}/` | One production |
-| `GET` `POST` | `/api/productions/{id}/cues/` | List or append cues |
-| `POST` | `/api/cues/{id}/fire/` | Fire a cue: inserts a `CueEvent` and returns it |
-| `GET` | `/api/productions/{id}/events/?run=…` | The run log, optionally for one run |
+| `GET` `POST` | `/api/productions/{id}/cues/` | List or add cues |
+| `GET` `PUT` `PATCH` `DELETE` | `/api/cues/{id}/` | One cue |
+| `GET` `POST` | `/api/productions/{id}/runs/` | List or start runs |
+| `GET` `PATCH` | `/api/runs/{id}/` | One run, with its event log and current state |
+| `POST` | `/api/runs/{id}/go/` | Fire the next cue, or the cue given as `{"cue": id}` |
+| `POST` | `/api/runs/{id}/back/` | Step back to the previous cue |
+| `POST` | `/api/runs/{id}/goto/` | Fire the cue given as `{"cue": id}` |
+| `POST` | `/api/runs/{id}/reset/` | Clear the active cue |
+| `POST` | `/api/runs/{id}/end/` | End the run; it then refuses further actions |
 
-Every endpoint requires authentication (DRF token or session). Querysets are filtered to the requesting user, so another user's production or cue returns 404.
+Every endpoint requires authentication (DRF token or session). Querysets are filtered to the requesting user, so another user's production, cue or run returns 404. The server decides which cue is next: it locks the run row for each action, so two GOs at once can't fire the same cue.
 
-**About "append-only":** this is enforced in the application layer, not the database. `CueEvent.save()` refuses to update an existing row, `CueEvent.delete()` raises, the API has no update or delete route for events, and the admin is read-only for them. The database does not block `UPDATE` or `DELETE`, and deleting a production or cue cascades through its events.
+**About "append-only":** this is enforced in the application layer, not the database. `CueEvent.save()` refuses to update an existing row, `CueEvent.delete()` raises, the API has no update or delete route for events, and the admin is read-only for them. The database does not block `UPDATE` or `DELETE`, and deleting a production or run cascades through its events. Each event keeps a copy of the cue's number and label, so editing or deleting a cue later does not change the log.
 
-The three tests in `backend/shows/tests.py` cover: firing a cue adds a new event without changing earlier ones; unauthenticated writes get 401; and one user cannot see or fire into another user's production.
+The tests in `backend/shows/tests.py` cover: actions add events without changing earlier ones; unauthenticated writes get 401; one user cannot see or change another user's data; numeric cue ordering; cue editing and duplicate numbers; GO, BACK, GOTO and RESET at both ends of the list; log entries surviving a cue being renamed or deleted; ended runs; and the data migration rejecting bad cue numbers.
 
 ## Frontend
 
 Two screens: a productions list with a create form, and the run-of-show board (`frontend/src/Board.jsx`). The GSAP techniques used on the board:
 
 - **Stagger:** on load, `gsap.from()` with `stagger` brings the cue cards in one after another.
-- **Tweens:** GO posts to `/fire/`, then `gsap.to()` moves each card between its pending, standby, active, and complete looks (colour, border, opacity, scale), slides the playhead along the track, and `gsap.fromTo()` adds a flash on the cue that just went. The space bar also works as GO.
+- **Tweens:** GO posts to the run's `go/` endpoint, then `gsap.to()` moves each card between its pending, standby, active, and complete looks (colour, border, opacity, scale), slides the playhead along the track, and `gsap.fromTo()` adds a flash on the cue that just went. The space bar also works as GO.
 - **Timeline:** "Preview run" builds a `gsap.timeline()` with one label per cue and sequences through the whole list. It is visual only and writes nothing to the run log; when it ends, the board returns to the recorded state of the current run.
 - `useGSAP` and `contextSafe` from `@gsap/react` scope the animations to the component so they are cleaned up on unmount.
 
