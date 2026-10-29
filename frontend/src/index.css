@@ -108,7 +108,7 @@ button.danger:not(.ghost) { background: #2a1214; }
 .edit-help { font-size: 0.8rem; line-height: 1.5; }
 .cue-page { color: var(--muted); font-size: 0.75rem; text-align: right; }
 .cue-status { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.12em; text-align: right; }
-.is-previewing .cue-status { visibility: hidden; }
+.is-playing-back .cue-status { visibility: hidden; }
 
 .controls { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 1rem; position: sticky; top: 1rem; }
 .go {
@@ -144,3 +144,13 @@ select { font: inherit; color: inherit; background: #181b21; border: 1px solid v
   .editor-row { grid-template-columns: 4rem 1fr 4.4rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--line); }
 }
 .log-action { color: var(--stby); font-weight: 700; }
+
+/* Playback */
+.playback { margin-top: 0.2rem; }
+.playback.on { border: 1px solid var(--line); border-radius: 4px; padding: 0.6rem; }
+.playback .row { align-items: center; }
+.speeds { display: flex; flex: 1; gap: 0.2rem; }
+.speeds button { flex: 1; padding: 0.45rem 0; font-size: 0.75rem; }
+.speeds button.on { background: #2a2f37; color: #fff; }
+.scrub { width: 100%; accent-color: var(--stby); margin: 0.2rem 0; }
+.clock { font-size: 0.75rem; text-align: right; margin: 0; font-variant-numeric: tabular-nums; }
