@@ -10,14 +10,14 @@ gsap.registerPlugin(useGSAP)
 // The entrance animates the outer <li>, so the two never tween the same property.
 const LOOK = {
   pending: { backgroundColor: '#14171c', borderColor: '#262b33', opacity: 0.7, scale: 1 },
-  standby: { backgroundColor: '#1c1a12', borderColor: '#d9a520', opacity: 1, scale: 1 },
-  active: { backgroundColor: '#0d3324', borderColor: '#3ddc84', opacity: 1, scale: 1.02 },
+  standby: { backgroundColor: '#22262d', borderColor: '#8a929e', opacity: 1, scale: 1 },
+  active: { backgroundColor: '#3a2d0a', borderColor: '#e8b730', opacity: 1, scale: 1.02 },
   complete: { backgroundColor: '#101216', borderColor: '#1d2026', opacity: 0.4, scale: 1 },
 }
 
 const FLASH = {
-  from: { boxShadow: '0 0 0 8px rgba(61, 220, 132, 0.55)' },
-  to: { boxShadow: '0 0 0 0px rgba(61, 220, 132, 0)', duration: 0.6, ease: 'power2.out' },
+  from: { boxShadow: '0 0 0 8px rgba(232, 183, 48, 0.55)' },
+  to: { boxShadow: '0 0 0 0px rgba(232, 183, 48, 0)', duration: 0.6, ease: 'power2.out' },
 }
 
 function stateAt(i, activeIdx) {
