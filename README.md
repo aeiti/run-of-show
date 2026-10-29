@@ -85,7 +85,16 @@ The tests in `backend/shows/tests.py` cover: actions add events without changing
 
 ## Frontend
 
-Two screens: a productions list with a create form, and the run-of-show board (`frontend/src/Board.jsx`). The GSAP techniques used on the board:
+Two screens, with URLs that survive a reload (React Router): the productions list at `/`, and the run-of-show board for one production at `/productions/{id}` (`frontend/src/Board.jsx`).
+
+The board has two modes, like Live and Blind on a lighting console:
+
+- **Live** shows the cue list as cards, with scene dividers and cue notes, and is where the show is run.
+- **Edit** turns the cue list into inline fields (number, label, page, scene, notes). A field saves on Enter or when it loses focus, Esc puts it back, delete asks for a second click, and new cues land in number order. The production's details are edited from the board header; deleting a production means typing its name.
+
+Run `npm test` in `frontend/` for the Vitest tests of the board's state helpers (`frontend/src/board/state.js`).
+
+The GSAP techniques used on the board:
 
 - **Stagger:** on load, `gsap.from()` with `stagger` brings the cue cards in one after another.
 - **Tweens:** GO posts to the run's `go/` endpoint, then `gsap.to()` moves each card between its pending, standby, active, and complete looks (colour, border, opacity, scale), slides the playhead along the track, and `gsap.fromTo()` adds a flash on the cue that just went. The space bar also works as GO.
