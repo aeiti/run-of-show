@@ -154,3 +154,22 @@ select { font: inherit; color: inherit; background: #181b21; border: 1px solid v
 .speeds button.on { background: #2a2f37; color: #fff; }
 .scrub { width: 100%; accent-color: var(--stby); margin: 0.2rem 0; }
 .clock { font-size: 0.75rem; text-align: right; margin: 0; font-variant-numeric: tabular-nums; }
+
+/* Import dialog */
+.edit-pane { min-width: 0; }
+.edit-tools { margin-bottom: 0.6rem; }
+.dialog-backdrop { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); display: grid; place-items: center; padding: 16px; z-index: 10; }
+.dialog { width: min(760px, 100%); max-height: 90vh; overflow-y: auto; }
+.dialog select { width: 100%; }
+.dialog code { color: var(--text); }
+.import-summary { display: flex; flex-wrap: wrap; gap: 0.35rem; margin: 0.8rem 0 0.5rem; }
+.chip { font-size: 0.72rem; border: 1px solid var(--line); border-radius: 999px; padding: 0.15rem 0.55rem; }
+.chip.create { color: var(--go); }
+.chip.update, .chip.delete { color: var(--stby); }
+.chip.reject { color: var(--err); }
+.import-table { max-height: 40vh; overflow: auto; border: 1px solid var(--line); border-radius: 4px; }
+.import-table table { width: 100%; border-collapse: collapse; font-size: 0.75rem; }
+.import-table th, .import-table td { text-align: left; padding: 0.3rem 0.5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+.import-table th { color: var(--muted); font-weight: 500; position: sticky; top: 0; background: var(--panel); }
+.import-table tr.reject td { color: var(--err); }
+.import-table tr.delete td { color: var(--stby); }
