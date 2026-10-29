@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { cueStates, playheadIndex, sortCues } from './state'
+import { cueStates, findByNumber, playheadIndex, sortCues, stepLoad } from './state'
 
 const cues = sortCues([
   { id: 5, number: '100' },
@@ -40,6 +40,32 @@ describe('cueStates', () => {
     expect(cueStates(remaining, { active_cue: null, active_number: '12.5', next_cue: 4 })).toEqual([
       'complete', 'complete', 'standby', 'pending',
     ])
+  })
+})
+
+describe('loaded cue', () => {
+  const state = { active_cue: 2, active_number: '12', next_cue: 3 }
+
+  it('takes the standby place, and the server next cue goes back to pending', () => {
+    expect(cueStates(cues, state, 5)).toEqual(['complete', 'active', 'pending', 'pending', 'loaded'])
+  })
+
+  it('can load a cue behind the active one without marking it complete', () => {
+    expect(cueStates(cues, state, 1)).toEqual(['loaded', 'active', 'pending', 'pending', 'pending'])
+  })
+
+  it('arrow keys step the load from the next cue, then from the loaded cue, within the list', () => {
+    expect(stepLoad(cues, state, null, 1)).toBe(4) // next is 12.5 -> 20
+    expect(stepLoad(cues, state, 4, -1)).toBe(3)
+    expect(stepLoad(cues, state, 5, 1)).toBe(5) // stays on the last cue
+    expect(stepLoad(cues, state, 1, -1)).toBe(1) // stays on the first cue
+  })
+
+  it('finds a cue by number however it is typed', () => {
+    expect(findByNumber(cues, '12.50')?.id).toBe(3)
+    expect(findByNumber(cues, ' 100 ')?.id).toBe(5)
+    expect(findByNumber(cues, '13')).toBeNull()
+    expect(findByNumber(cues, 'abc')).toBeNull()
   })
 })
 

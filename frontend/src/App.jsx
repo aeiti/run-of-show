@@ -29,6 +29,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<ProductionsRoute />} />
         <Route path="/productions/:productionId" element={<BoardRoute />} />
+        <Route path="/productions/:productionId/runs/:runId" element={<BoardRoute />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </div>
@@ -41,8 +42,16 @@ function ProductionsRoute() {
 }
 
 function BoardRoute() {
-  const { productionId } = useParams()
+  const { productionId, runId } = useParams()
   const navigate = useNavigate()
-  // Keyed so switching productions starts a fresh board rather than reusing state.
-  return <Board key={productionId} productionId={Number(productionId)} onBack={() => navigate('/')} />
+  // Keyed by production only: switching runs keeps the board mounted and animates the change.
+  return (
+    <Board
+      key={productionId}
+      productionId={Number(productionId)}
+      runId={runId ? Number(runId) : null}
+      onBack={() => navigate('/')}
+      onSelectRun={(id, options) => navigate(`/productions/${productionId}/runs/${id}`, options)}
+    />
+  )
 }

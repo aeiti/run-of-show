@@ -8,7 +8,7 @@ export function sortCues(cues) {
 }
 
 /**
- * One of 'complete' | 'active' | 'standby' | 'pending' per cue, in list order.
+ * One of 'complete' | 'active' | 'loaded' | 'standby' | 'pending' per cue, in list order.
  *
  * "Complete" is decided by number rather than by position, so it is still
  * right when the active cue has been deleted (active_cue is null but
@@ -16,11 +16,13 @@ export function sortCues(cues) {
  * active_number is always the server's active_cue, so it is caught by the
  * first check and never reaches the "complete" comparison.
  */
-export function cueStates(cues, state) {
+export function cueStates(cues, state, loadedCue = null) {
   const activeNumber = state?.active_number == null ? null : Number(state.active_number)
   return cues.map((cue) => {
     if (cue.id === state?.active_cue) return 'active'
-    if (cue.id === state?.next_cue) return 'standby'
+    // A loaded cue replaces the server's next cue as the one GO will fire.
+    if (cue.id === loadedCue) return 'loaded'
+    if (loadedCue === null && cue.id === state?.next_cue) return 'standby'
     if (activeNumber !== null && Number(cue.number) < activeNumber) return 'complete'
     return 'pending'
   })
@@ -31,4 +33,19 @@ export function playheadIndex(cues, state) {
   if (state?.active_number == null) return -1
   const active = Number(state.active_number)
   return cues.reduce((acc, cue, i) => (Number(cue.number) <= active ? i : acc), -1)
+}
+
+/** The cue a step of +1 or -1 lands on from the loaded cue (or the next cue), for arrow-key loading. */
+export function stepLoad(cues, state, loadedCue, step) {
+  const from = loadedCue ?? state?.next_cue ?? null
+  const i = cues.findIndex((c) => c.id === from)
+  if (i === -1) return cues.length ? cues[step > 0 ? 0 : cues.length - 1].id : null
+  return cues[Math.min(Math.max(i + step, 0), cues.length - 1)].id
+}
+
+/** The cue with this number, comparing as numbers so "12.50" finds Q12.5. */
+export function findByNumber(cues, text) {
+  // An empty box becomes 0, which never matches: the API only accepts numbers above 0.
+  const value = Number(String(text).trim())
+  return cues.find((c) => Number(c.number) === value) ?? null
 }

@@ -67,4 +67,5 @@ export const api = {
   back: (runId) => request(`/runs/${runId}/back/`, { method: 'POST' }),
   goto: (runId, cue) => request(`/runs/${runId}/goto/`, { method: 'POST', body: { cue } }),
   reset: (runId) => request(`/runs/${runId}/reset/`, { method: 'POST' }),
+  endRun: (runId) => request(`/runs/${runId}/end/`, { method: 'POST' }),
 }
