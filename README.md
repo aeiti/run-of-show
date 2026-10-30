@@ -104,7 +104,7 @@ The GSAP techniques used on the board:
 
 - **Stagger:** on load, `gsap.from()` with `stagger` brings the cue cards in one after another.
 - **Tweens:** GO posts to the run's `go/` endpoint, then `gsap.to()` moves each card between its pending, standby, active, and complete looks (colour, border, opacity, scale), slides the playhead along the track, and `gsap.fromTo()` adds a flash on the cue that just went. The space bar also works as GO.
-- **Timeline:** "Preview run" builds a `gsap.timeline()` with one label per cue and sequences through the whole list. It is visual only and writes nothing to the run log; when it ends, the board returns to the recorded state of the current run.
+- **Timeline playback:** "Play back this run" turns the run's log into one `gsap.timeline()`: every card change and playhead move is a tween placed at the real time it happened (`frontend/src/board/Playback.jsx`). Speed (1×, 2×, 5×, 20×) is `timeScale()`, the scrubber is `progress()`, and pause and play are the timeline's own. The clock and scrubber are written to the DOM from `onUpdate` rather than through React state, so playback doesn't re-render the board every frame. A run with nothing recorded plays an evenly spaced preview instead. Playback writes nothing to the log, and Stop returns the board to the run's live state.
 - `useGSAP` and `contextSafe` from `@gsap/react` scope the animations to the component so they are cleaned up on unmount.
 
 ## Not included
