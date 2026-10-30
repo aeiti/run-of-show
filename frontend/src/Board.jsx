@@ -3,13 +3,16 @@ import gsap from 'gsap'
 import { useGSAP } from '@gsap/react'
 import { api } from './api'
 import CueEditor from './board/CueEditor'
+import FilesDialog from './board/FilesDialog'
 import PeopleDialog from './board/PeopleDialog'
 import { can } from './access'
 import ImportDialog from './board/ImportDialog'
 import ProductionHeader from './board/ProductionHeader'
 import Playback from './board/Playback'
 import RunPanel from './board/RunPanel'
+import ScriptViewer from './board/ScriptViewer'
 import Transport from './board/Transport'
+import { currentScript } from './board/files'
 import { extraTotal, fadeFor, formatSeconds, formatTime } from './board/cueTime'
 import { FLASH, LOOK, STATUS, playheadPos } from './board/looks'
 import { cueStates, findByNumber, playheadIndex, sortCues, stepLoad } from './board/state'
@@ -38,6 +41,9 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
   const [error, setError] = useState('')
   const [importing, setImporting] = useState(false)
   const [showPeople, setShowPeople] = useState(false)
+  const [files, setFiles] = useState([])
+  const [showFiles, setShowFiles] = useState(false)
+  const [showScript, setShowScript] = useState(false)
 
   const scope = useRef(null)
   const cardRefs = useRef([])
@@ -57,6 +63,9 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
   // What this user's role on the production allows; the server checks it too.
   const canOperate = can(production?.role, 'operate')
   const canEdit = can(production?.role, 'edit')
+  // The latest script, shown beside the cue list at the active cue's page.
+  const script = useMemo(() => currentScript(files), [files])
+  const scriptPage = cueList.find((c) => c.id === run?.state.active_cue)?.page ?? null
 
   // The server decides the active and next cue; the board looks them up and
   // overlays the operator's loaded cue, which only exists on this screen.
@@ -101,6 +110,18 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
     }
     // Only on a new production: runId changes are handled by the effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productionId])
+
+  // Apart from the board's own data, so a problem with files doesn't stop the show.
+  useEffect(() => {
+    let cancelled = false
+    api
+      .files(productionId)
+      .then((f) => !cancelled && setFiles(f))
+      .catch((e) => setError(e.message))
+    return () => {
+      cancelled = true
+    }
   }, [productionId])
 
   useEffect(() => {
@@ -312,6 +333,9 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
           onSaved={setProduction}
           onDeleted={onBack}
           onPeople={() => setShowPeople(true)}
+          onFiles={() => setShowFiles(true)}
+          onScript={script && (() => setShowScript(!showScript))}
+          scriptShown={showScript}
         />
         <div className="mode-toggle" role="group" aria-label="Board mode" hidden={!canEdit}>
           <button className={live ? 'on' : ''} aria-pressed={live} onClick={() => setMode('live')}>
@@ -351,7 +375,7 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
         <div className="playhead" ref={markerRef} />
       </div>
 
-      <div className="board-body">
+      <div className={`board-body${script && showScript ? ' with-script' : ''}`}>
         {live ? (
           <ol className="cue-list">
             {cueList.map((c, i) => [
@@ -413,6 +437,8 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
           </div>
         )}
 
+        {script && showScript && <ScriptViewer file={script} page={scriptPage} />}
+
         <aside className="controls">
           {live ? (
             <>
@@ -468,6 +494,9 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
       </div>
       {showPeople && (
         <PeopleDialog production={production} me={me} onClose={() => setShowPeople(false)} onLeft={onBack} />
+      )}
+      {showFiles && (
+        <FilesDialog production={production} files={files} onChange={setFiles} onClose={() => setShowFiles(false)} />
       )}
       {importing && (
         <ImportDialog

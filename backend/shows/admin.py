@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Cue, CueEvent, CueNote, Membership, Production, Run
+from .models import Cue, CueEvent, CueNote, Membership, Production, ProductionFile, Run
 
 
 class MembershipInline(admin.TabularInline):
@@ -43,6 +43,12 @@ class CueEventAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+
+@admin.register(ProductionFile)
+class ProductionFileAdmin(admin.ModelAdmin):
+    list_display = ["name", "version", "kind", "size", "production", "uploaded_by", "uploaded_at"]
+    list_filter = ["production", "kind"]
 
 
 @admin.register(CueNote)

@@ -1,5 +1,7 @@
+boto3==1.43.122
 django==5.2.18
 django-cors-headers==4.9.0
+django-storages[s3]==1.14.6
 djangorestframework==3.18.3
 psycopg==3.3.6
 psycopg-binary==3.3.6

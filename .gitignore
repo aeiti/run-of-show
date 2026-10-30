@@ -24,3 +24,6 @@ dist/
 
 # Local Claude Code config
 .claude/
+
+# Uploaded files in development
+/backend/media/

@@ -4,7 +4,8 @@ import { can, ROLES } from '../access'
 
 const FIELDS = ['name', 'company', 'venue', 'performance_date', 'notes']
 
-export default function ProductionHeader({ production, onSaved, onDeleted, onPeople }) {
+// onScript is null when there is no script to show.
+export default function ProductionHeader({ production, onSaved, onDeleted, onPeople, onFiles, onScript, scriptShown }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(null)
   const [confirmName, setConfirmName] = useState(null)
@@ -44,6 +45,14 @@ export default function ProductionHeader({ production, onSaved, onDeleted, onPeo
         <div className="row-between">
           <h2>{production.name}</h2>
           <div className="row header-actions">
+            {onScript && (
+              <button className={`ghost small${scriptShown ? ' on' : ''}`} aria-pressed={scriptShown} onClick={onScript}>
+                Script
+              </button>
+            )}
+            <button className="ghost small" onClick={onFiles}>
+              Files
+            </button>
             <button className="ghost small" onClick={onPeople}>
               People
             </button>

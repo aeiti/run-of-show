@@ -29,10 +29,14 @@ async function request(path, { method = 'GET', body, raw = false, token = getTok
   return res.status === 204 ? null : res.json()
 }
 
+// Files are private to a production, so they need the auth header too: fetch
+// them and use a blob (for an <img> or <iframe>, through useBlobUrl).
+const blob = (path) => request(path, { raw: true }).then((res) => res.blob())
+
 // Downloads need the auth header, so fetch the file and hand the browser a blob.
-async function download(path) {
+async function download(path, fallbackName = 'export.csv') {
   const res = await request(path, { raw: true })
-  const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? 'export.csv'
+  const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? fallbackName
   const url = URL.createObjectURL(await res.blob())
   const a = Object.assign(document.createElement('a'), { href: url, download: name })
   a.click()
@@ -105,6 +109,13 @@ export const api = {
   addMember: (id, user, role) => request(`/productions/${id}/members/`, { method: 'POST', body: { user, role } }),
   updateMember: (membershipId, role) => request(`/memberships/${membershipId}/`, { method: 'PATCH', body: { role } }),
   removeMember: (membershipId) => request(`/memberships/${membershipId}/`, { method: 'DELETE' }),
+  // Scripts, showfiles and other files: every version, newest version first.
+  files: (id) => request(`/productions/${id}/files/`),
+  // form is FormData with file and kind; the same kind and name adds a version.
+  uploadFile: (id, form) => request(`/productions/${id}/files/`, { method: 'POST', body: form }),
+  deleteFile: (fileId) => request(`/files/${fileId}/`, { method: 'DELETE' }),
+  downloadFile: (file) => download(`/files/${file.id}/download/`, file.name),
+  fileBlob: (fileId) => blob(`/files/${fileId}/download/`),
   runs: (id) => request(`/productions/${id}/runs/`),
   createRun: (id, data) => request(`/productions/${id}/runs/`, { method: 'POST', body: data }),
   run: (runId) => request(`/runs/${runId}/`),
