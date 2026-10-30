@@ -37,7 +37,7 @@ def show(alice):
     explicitly and distinct, so a lost or reordered time shows up.
     """
     production = Production.objects.create(
-        owner=alice, name="Show A", company="Co", venue="Hall", performance_date="2026-03-14", notes="Notes"
+        owner=alice, name="Show A", company="Co", venue="Hall", opening_date="2026-03-14", closing_date="2026-03-28", notes="Notes"
     )
     one = Cue.objects.create(
         production=production, number=Decimal("1"), label="Open", page=3, scene="PRESHOW", time=Decimal("3.9"), follow="F2"
@@ -53,7 +53,12 @@ def show(alice):
     ]
     for i, event in enumerate(events):
         CueEvent.objects.filter(pk=event.pk).update(fired_at=START + timedelta(minutes=i))
-    Run.objects.filter(pk=run.pk).update(created_at=START - timedelta(hours=1), ended_at=START + timedelta(hours=2))
+    Run.objects.filter(pk=run.pk).update(
+        created_at=START - timedelta(hours=1),
+        scheduled_start=START - timedelta(minutes=5),
+        started_at=START - timedelta(seconds=30),
+        ended_at=START + timedelta(hours=2),
+    )
     Cue.objects.filter(pk=two.pk).update(number=Decimal("3"))
     gone.delete()
     return production
@@ -64,14 +69,14 @@ def history(production):
     cues = list(production.cues.values("number", "label", "page", "notes", "scene", "time", "down_time", "duration", "follow"))
     runs = [
         {
-            **Run.objects.filter(pk=run.pk).values("label", "kind", "created_at", "ended_at", "notes").get(),
+            **Run.objects.filter(pk=run.pk).values("label", "kind", "created_at", "scheduled_start", "started_at", "ended_at", "notes").get(),
             "events": list(
                 run.events.values("action", "cue__number", "cue_number", "cue_label", "fired_at", "note")
             ),
         }
         for run in production.runs.order_by("created_at")
     ]
-    details = Production.objects.filter(pk=production.pk).values("name", "company", "venue", "performance_date", "notes").get()
+    details = Production.objects.filter(pk=production.pk).values("name", "company", "venue", "opening_date", "closing_date", "notes").get()
     return {"details": details, "cues": cues, "runs": runs}
 
 

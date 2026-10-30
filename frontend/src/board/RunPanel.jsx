@@ -1,11 +1,23 @@
 import { useState } from 'react'
 import { CueNoteForm, CueNoteItem } from './CueNotes'
 import { formatClock } from './playbackSteps'
+import RunTimes from './RunTimes'
+import { fromLocalInput } from '../dates'
 
 const KINDS = ['rehearsal', 'tech', 'preview', 'performance', 'other']
 
+// Dated by when the run was planned or happened, falling back to when it was made.
 const runName = (r) =>
-  [r.label, r.kind, new Date(r.created_at).toLocaleDateString(), r.ended_at && 'ended'].filter(Boolean).join(' · ')
+  [
+    r.label,
+    r.kind,
+    new Date(r.scheduled_start ?? r.started_at ?? r.created_at).toLocaleDateString(),
+    r.ended_at && 'ended',
+  ]
+    .filter(Boolean)
+    .join(' · ')
+
+const BLANK = { label: '', kind: 'rehearsal', scheduled_start: '' }
 
 function logText(events, i) {
   const e = events[i]
@@ -37,20 +49,23 @@ export default function RunPanel({
   onSelect,
   onCreate,
   onEnd,
+  onUpdate,
   onExport,
   onAddNote,
   onEditNote,
   onDeleteNote,
 }) {
   const [creating, setCreating] = useState(false)
-  const [draft, setDraft] = useState({ label: '', kind: 'rehearsal' })
+  const [draft, setDraft] = useState(BLANK)
   const [confirmEnd, setConfirmEnd] = useState(false)
 
   async function create(e) {
     e.preventDefault()
-    if (await onCreate({ ...draft, label: draft.label.trim() })) {
+    if (
+      await onCreate({ ...draft, label: draft.label.trim(), scheduled_start: fromLocalInput(draft.scheduled_start) })
+    ) {
       setCreating(false)
-      setDraft({ label: '', kind: 'rehearsal' })
+      setDraft(BLANK)
     }
   }
 
@@ -91,23 +106,36 @@ export default function RunPanel({
       </div>
 
       {creating && (
-        <form className="row" onSubmit={create}>
-          <input
-            required
-            autoFocus
-            aria-label="New run label"
-            placeholder="Preview 2"
-            value={draft.label}
-            onChange={(e) => setDraft({ ...draft, label: e.target.value })}
-          />
-          <select aria-label="Kind" value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value })}>
-            {KINDS.map((k) => (
-              <option key={k}>{k}</option>
-            ))}
-          </select>
-          <button type="submit">Start</button>
+        <form className="new-run" onSubmit={create}>
+          <div className="row">
+            <input
+              required
+              autoFocus
+              aria-label="New run label"
+              placeholder="Preview 2"
+              value={draft.label}
+              onChange={(e) => setDraft({ ...draft, label: e.target.value })}
+            />
+            <select aria-label="Kind" value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value })}>
+              {KINDS.map((k) => (
+                <option key={k}>{k}</option>
+              ))}
+            </select>
+          </div>
+          <div className="row">
+            <input
+              type="datetime-local"
+              aria-label="Scheduled start (optional)"
+              title="Scheduled start (optional)"
+              value={draft.scheduled_start}
+              onChange={(e) => setDraft({ ...draft, scheduled_start: e.target.value })}
+            />
+            <button type="submit">Start</button>
+          </div>
         </form>
       )}
+
+      {run && <RunTimes key={run.id} run={run} canEdit={canOperate} onSave={onUpdate} />}
 
       {run?.ended_at ? (
         <p className="muted ended">

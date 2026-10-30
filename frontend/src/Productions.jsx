@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { api } from './api'
 import { ROLES } from './access'
+import { formatDateRange } from './dates'
 
-const blank = { name: '', company: '', venue: '', performance_date: '' }
+const blank = { name: '', company: '', venue: '', opening_date: '', closing_date: '' }
 
 export default function Productions({ onOpen }) {
   const [productions, setProductions] = useState([])
@@ -21,7 +22,8 @@ export default function Productions({ onOpen }) {
     try {
       const created = await api.createProduction({
         ...form,
-        performance_date: form.performance_date || null,
+        opening_date: form.opening_date || null,
+        closing_date: form.closing_date || null,
       })
       setProductions([created, ...productions])
       setForm(blank)
@@ -69,7 +71,7 @@ export default function Productions({ onOpen }) {
               <button className="production-open" onClick={() => onOpen(p.id)}>
                 <strong>{p.name}</strong>
                 <span className="muted">
-                  {[p.company, p.venue, p.performance_date].filter(Boolean).join(' · ')}
+                  {[p.company, p.venue, formatDateRange(p.opening_date, p.closing_date)].filter(Boolean).join(' · ')}
                   {p.role !== 'owner' && (
                     <span className="shared-badge">
                       {ROLES[p.role]} · {p.owner.display_name || p.owner.username}
@@ -113,10 +115,16 @@ export default function Productions({ onOpen }) {
             Venue
             <input {...field('venue')} />
           </label>
-          <label>
-            Performance date
-            <input type="date" {...field('performance_date')} />
-          </label>
+          <div className="date-pair">
+            <label>
+              Opens
+              <input type="date" {...field('opening_date')} />
+            </label>
+            <label>
+              Closes
+              <input type="date" min={form.opening_date || undefined} {...field('closing_date')} />
+            </label>
+          </div>
           <button type="submit">Create</button>
           {error && <p className="error">{error}</p>}
         </form>

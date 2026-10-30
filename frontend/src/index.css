@@ -167,6 +167,19 @@ select { font: inherit; color: inherit; background: #181b21; border: 1px solid v
 .resume { border-color: var(--go); color: var(--go); background: #0d3324; font-weight: 700; letter-spacing: 0.12em; }
 .playback-hold { display: none; font-size: 0.75rem; }
 .preview-banner { color: var(--stby); font-size: 0.75rem; letter-spacing: 0.12em; margin: 0 0 0.5rem; }
+.new-run { margin-bottom: 0.3rem; }
+.new-run .row { margin-bottom: 0.35rem; }
+.new-run input[type='datetime-local'] { color-scheme: dark; }
+.run-times { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.5rem; margin: 0.4rem 0 0.2rem; }
+.run-times dl { display: grid; grid-template-columns: auto 1fr; gap: 0.1rem 0.6rem; margin: 0; font-size: 0.75rem; }
+.run-times dt { color: var(--muted); }
+.run-times dd { margin: 0; font-variant-numeric: tabular-nums; }
+.run-times .late { color: var(--stby); }
+.run-times-form { margin: 0.4rem 0; }
+.run-times-form label { margin-bottom: 0.4rem; }
+.run-times-form input { width: 100%; box-sizing: border-box; color-scheme: dark; }
+.date-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0 0.5rem; }
+.date-pair input { min-width: 0; color-scheme: dark; }
 .log { list-style: none; margin: 0; padding: 0; font-size: 0.75rem; max-height: 180px; overflow-y: auto; display: grid; gap: 0.25rem; }
 .log time { color: var(--muted); margin-right: 0.4rem; }
 
