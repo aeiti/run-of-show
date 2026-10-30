@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Link } from 'react-router'
 import { CueNoteForm, CueNoteItem } from './CueNotes'
 import { formatClock } from './playbackSteps'
 import RunTimes from './RunTimes'
@@ -153,9 +154,18 @@ export default function RunPanel({
       <div className="row-between">
         <h3>Log · {run?.label}</h3>
         {run && (
-          <button className="ghost small" onClick={() => onExport(run.id)}>
-            Export
-          </button>
+          <div className="row log-tools">
+            <Link
+              className="button ghost small"
+              to={`/productions/${run.production}/runs/${run.id}/report`}
+              title="Times, holds, scene lengths and notes, to print or email"
+            >
+              Report
+            </Link>
+            <button className="ghost small" onClick={() => onExport(run.id)}>
+              Export
+            </button>
+          </div>
         )}
       </div>
       {run && canOperate && (

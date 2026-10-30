@@ -264,6 +264,28 @@ class OptionalCueTargetSerializer(serializers.Serializer):
     cue = serializers.IntegerField(required=False, allow_null=True)
 
 
+# A show report goes to the production team, not a mailing list.
+MAX_REPORT_RECIPIENTS = 10
+
+
+class ReportEmailSerializer(serializers.Serializer):
+    """Who to email a run's report to: ``to`` is a list of addresses."""
+
+    to = serializers.ListField(
+        child=serializers.EmailField(max_length=254),
+        allow_empty=False,
+        max_length=MAX_REPORT_RECIPIENTS,
+        error_messages={"max_length": f"Send the report to at most {MAX_REPORT_RECIPIENTS} addresses at a time."},
+    )
+
+    def validate_to(self, addresses):
+        # The same address typed twice gets one email.
+        unique = {}
+        for address in addresses:
+            unique.setdefault(address.strip().lower(), address.strip())
+        return list(unique.values())
+
+
 # Whole-production backup (see backup.py). The same serializers write the
 # file and read it back, so an export always imports.
 
