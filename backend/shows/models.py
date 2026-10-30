@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.validators import RegexValidator
 from django.db import models
 
 
@@ -20,6 +21,11 @@ class Production(models.Model):
         return self.name
 
 
+FOLLOW_VALIDATOR = RegexValidator(
+    r"^[FH]\d{1,5}(\.\d{1,2})?$", "Follow is F or H and a time in seconds, such as F2 or H0.5."
+)
+
+
 class Cue(models.Model):
     production = models.ForeignKey(Production, on_delete=models.CASCADE, related_name="cues")
     # Decimal so point cues sort where they belong: 12 < 12.5 < 13 < 100.
@@ -29,6 +35,16 @@ class Cue(models.Model):
     notes = models.TextField(blank=True)
     # Eos "scene" text: the cue that starts a scene carries its name.
     scene = models.CharField(max_length=200, blank=True)
+    # Cue timing in seconds, as on Eos. ``time`` is the up time and
+    # ``down_time`` the down time when it differs. ``duration`` is Eos's own
+    # total for the cue, which also counts delays, discrete times and parts;
+    # it is cleared when the times are edited here, since it can't be
+    # recomputed without them. ``follow`` is Eos's "F2" (follow) or "H3" (hang):
+    # shown to the operator, never fired by the board.
+    time = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    down_time = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    duration = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    follow = models.CharField(max_length=12, blank=True, validators=[FOLLOW_VALIDATOR])
 
     class Meta:
         ordering = ["number"]

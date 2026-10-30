@@ -8,11 +8,14 @@ from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from rest_framework.test import APIClient
 
+from shows import csv_io
 from shows.models import Cue, CueEvent, Production, Run
 
 # The shape of an ETC Eos CSV export: a section before TARGETS (whose header
 # differs), Cue_List rows, cues in two lists with the same numbers, a part
-# row, a point cue, and label / notes / scene text.
+# row, a point cue, label / notes / scene text, and cue timing as in a real
+# show file: a part cue has a blank time and Eos's total as its duration, and
+# times of a minute or more are written m:ss.
 TARGETS_HEADER = (
     "TARGET_TYPE,TARGET_TYPE_AS_TEXT,TARGET_LIST_NUMBER,TARGET_ID,TARGET_DCID,PART_NUMBER,LABEL,"
     "TIME_DATA,UP_DELAY,DOWN_TIME,DOWN_DELAY,FOCUS_TIME,FOCUS_DELAY,COLOR_TIME,COLOR_DELAY,BEAM_TIME,"
@@ -21,7 +24,7 @@ TARGETS_HEADER = (
 )
 
 
-def eos_row(kind, list_no, cue, part="", label="", notes="", scene=""):
+def eos_row(kind, list_no, cue, part="", label="", notes="", scene="", time="", down="", duration="", follow=""):
     values = dict.fromkeys(TARGETS_HEADER.split(","), "")
     values.update(
         TARGET_TYPE="1" if kind == "Cue" else "15",
@@ -32,6 +35,10 @@ def eos_row(kind, list_no, cue, part="", label="", notes="", scene=""):
         LABEL=label,
         CUE_NOTES=notes,
         SCENE_TEXT=scene,
+        TIME_DATA=time,
+        DOWN_TIME=down,
+        DURATION=duration,
+        FOLLOW=follow,
     )
     out = io.StringIO()
     csv.writer(out, lineterminator="\n").writerow(values.values())
@@ -48,10 +55,10 @@ EOS = (
     + "\n"
     + eos_row("Cue_List", "", "1", label="Main")
     + eos_row("Cue_List", "", "11", label="Rig Check")
-    + eos_row("Cue", "1", "1", label="Preset", scene="Preshow")
-    + eos_row("Cue", "1", "2", label="House out, stage up", notes="Wait for HM clearance")
-    + eos_row("Cue", "1", "2", part="1", label="Part 1 of Q2")
-    + eos_row("Cue", "1", "2.5", label="Follow")
+    + eos_row("Cue", "1", "1", label="Preset", scene="Preshow", time="3.9", duration="3.9")
+    + eos_row("Cue", "1", "2", label="House out, stage up", notes="Wait for HM clearance", duration="13")
+    + eos_row("Cue", "1", "2", part="1", label="Part 1 of Q2", time="8", duration="8")
+    + eos_row("Cue", "1", "2.5", label="Follow", time="5", down="1:00", duration="1:00", follow="F2")
     + eos_row("Cue", "11", "1", label="Rig check 1")
     + eos_row("Cue_List", "", "1", label="Main")  # Eos repeats list rows at the end
     + "END_TARGETS\n"
@@ -111,6 +118,46 @@ def test_eos_import_of_one_list(client, production):
         (Decimal("2"), "House out, stage up", "", "Wait for HM clearance"),
         (Decimal("2.5"), "Follow", "", ""),
     ]
+    times = list(production.cues.values_list("time", "down_time", "duration", "follow"))
+    assert times == [
+        (Decimal("3.9"), None, Decimal("3.9"), ""),
+        (None, None, Decimal("13"), ""),  # the part row's time is not the cue's
+        (Decimal("5"), Decimal("60"), Decimal("60"), "F2"),
+    ]
+    api = client.get(f"/api/productions/{production.id}/cues/").data[2]
+    assert (api["time"], api["down_time"], api["duration"], api["follow"]) == ("5", "60", "60", "F2")
+
+
+@pytest.mark.parametrize(
+    "text, seconds",
+    [("", None), ("0", "0"), ("3.9", "3.9"), ("1:00", "60"), ("2:00.5", "120.5"), ("1:02:03", "3723")],
+)
+def test_parse_seconds(text, seconds):
+    assert csv_io.parse_seconds(text) == (None if seconds is None else Decimal(seconds))
+
+
+@pytest.mark.parametrize("text", ["abc", "-1", "1:75", "1:2:3:4", "1000000", "nan"])
+def test_parse_seconds_refuses(text):
+    with pytest.raises(ValueError):
+        csv_io.parse_seconds(text)
+
+
+@pytest.mark.django_db
+def test_new_times_without_a_duration_clear_the_eos_duration(client, production):
+    Cue.objects.create(production=production, number=Decimal("1"), time=Decimal("5"), duration=Decimal("13"))
+    Cue.objects.create(production=production, number=Decimal("2"), time=Decimal("5"), duration=Decimal("13"))
+    Cue.objects.create(production=production, number=Decimal("3"), time=Decimal("5"), duration=Decimal("13"))
+    # Q1 gets a new time and no duration; Q2 only a label, so its timing stands;
+    # Q3 a new time with the same duration, which the file vouches for.
+    text = "number,label,time,duration\n1,,8,\n2,Renamed,,\n3,,8,13\n"
+    upload(client, production, {"text": text}, dry_run="false")
+    assert list(production.cues.values_list("time", "duration")) == [
+        (Decimal("8"), None),
+        (Decimal("5"), Decimal("13")),
+        (Decimal("8"), Decimal("13")),
+    ]
+    rejected = upload(client, production, {"text": "number,time,follow\n3,1:75,\n4,,X2\n"})
+    assert [r["reason"][:6] for r in rejected.data["rows"]] == ["Time '", "Follow"]
 
 
 @pytest.mark.django_db
