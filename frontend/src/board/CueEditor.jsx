@@ -19,7 +19,16 @@ const COLUMNS = [
     get: formatTime,
     put: parseTimeInput,
   },
-  { key: 'follow', label: 'F/H', className: 'narrow', placeholder: 'F2', ...plain('follow') },
+  // Empty is no follow or hang, shown as 0; a bare number is a follow ("2" saves F2).
+  {
+    key: 'follow',
+    label: 'F/H',
+    className: 'narrow',
+    placeholder: '0',
+    showPlaceholder: true,
+    title: 'Follow or hang: 2 is a 2s follow, H2 a 2s hang, 0 or empty is neither',
+    ...plain('follow'),
+  },
   {
     key: 'page',
     label: 'Pg',
@@ -91,6 +100,8 @@ function CueRow({ cue, onSaved, onDeleted }) {
           key={`${c.key}:${c.get(cue)}`}
           aria-label={`Cue ${cue.number} ${c.label}`}
           className={c.className}
+          placeholder={c.showPlaceholder ? c.placeholder : undefined}
+          title={c.title}
           inputMode={c.inputMode}
           required={c.required}
           defaultValue={c.get(cue)}
@@ -139,6 +150,7 @@ function NewCueRow({ productionId, onCreated }) {
           aria-label={`New cue ${c.label}`}
           placeholder={c.key === 'number' ? 'New' : (c.placeholder ?? c.label)}
           className={c.className}
+          title={c.title}
           inputMode={c.inputMode}
           required={c.required}
           value={draft[c.key]}

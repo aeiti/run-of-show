@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 
 from django.conf import settings
@@ -82,6 +83,15 @@ class Membership(models.Model):
 FOLLOW_VALIDATOR = RegexValidator(
     r"^[FH]\d{1,5}(\.\d{1,2})?$", "Follow is F or H and a time in seconds, such as F2 or H0.5."
 )
+
+
+def normalize_follow(text):
+    """Eos's "F2" or "H0.5" from what was typed. A bare number is a follow, and
+    0 (or nothing) is neither, so most cues need nothing typed at all."""
+    value = text.strip().upper()
+    if value and value[0] not in "FH":
+        value = "" if re.fullmatch(r"0+(\.0*)?", value) else f"F{value}"
+    return value
 
 
 class Cue(models.Model):

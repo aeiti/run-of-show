@@ -119,7 +119,7 @@ def test_import_accepts_an_uploaded_file(show, alice):
         (lambda d: d["cues"].append(dict(d["cues"][0])), "Cue 1 appears more than once"),
         (lambda d: d["runs"].append(dict(d["runs"][0])), "appears more than once"),
         (lambda d: d["runs"][0]["events"][0].update(cue="42"), "cue 42, which isn't in the file"),
-        (lambda d: d["cues"][0].update(follow="X9"), "Follow is F or H"),
+        (lambda d: d["cues"][0].update(follow="X9"), "Follow is a time in seconds"),
     ],
 )
 def test_import_rejects_a_bad_file_and_creates_nothing(show, alice, change, message):

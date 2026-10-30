@@ -22,6 +22,7 @@ from .models import (
     ProductionFile,
     Run,
     format_number,
+    normalize_follow,
 )
 from .services import run_state
 
@@ -161,7 +162,7 @@ class CueSerializer(serializers.ModelSerializer):
     time = SecondsField()
     down_time = SecondsField()
     duration = SecondsField()
-    # Declared here so "f2" can be upper-cased before the model's validator sees it.
+    # Declared here so "f2" or a bare "2" can be normalized before the model's validator sees it.
     follow = serializers.CharField(max_length=12, allow_blank=True, required=False)
 
     TIMES = ("time", "down_time")
@@ -172,12 +173,12 @@ class CueSerializer(serializers.ModelSerializer):
         read_only_fields = ["id"]
 
     def validate_follow(self, value):
-        value = value.strip().upper()
+        value = normalize_follow(value)
         if value:
             try:
                 FOLLOW_VALIDATOR(value)
-            except DjangoValidationError as e:
-                raise serializers.ValidationError(e.messages)
+            except DjangoValidationError:
+                raise serializers.ValidationError("Follow is a time in seconds, or H and a time for a hang: 2, F2 or H0.5.")
         return value
 
     def update(self, instance, validated_data):

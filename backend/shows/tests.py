@@ -135,6 +135,11 @@ def test_cue_times_and_follow(show):
     assert client.patch(url, {"follow": " f2 "}, format="json").data["follow"] == "F2"
     assert client.patch(url, {"follow": ""}, format="json").data["follow"] == ""
     assert client.patch(url, {"follow": "X2"}, format="json").status_code == 400
+    # A bare number is a follow, and 0 is neither: most cues need nothing typed.
+    assert client.patch(url, {"follow": "2.5"}, format="json").data["follow"] == "F2.5"
+    assert client.patch(url, {"follow": "0"}, format="json").data["follow"] == ""
+    assert client.patch(url, {"follow": "h0"}, format="json").data["follow"] == "H0"
+    assert client.patch(url, {"follow": "2x"}, format="json").status_code == 400
     assert client.patch(url, {"time": "-1"}, format="json").status_code == 400
 
 
