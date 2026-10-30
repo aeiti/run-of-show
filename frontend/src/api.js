@@ -4,14 +4,16 @@ const TOKEN_KEY = 'ros-token'
 export const getToken = () => localStorage.getItem(TOKEN_KEY)
 export const clearToken = () => localStorage.removeItem(TOKEN_KEY)
 
-async function request(path, { method = 'GET', body } = {}) {
-  const headers = { 'Content-Type': 'application/json' }
+async function request(path, { method = 'GET', body, raw = false } = {}) {
+  // FormData (file uploads) sets its own multipart Content-Type.
+  const form = body instanceof FormData
+  const headers = form ? {} : { 'Content-Type': 'application/json' }
   const token = getToken()
   if (token) headers.Authorization = `Token ${token}`
   const res = await fetch(`${BASE}${path}`, {
     method,
     headers,
-    body: body ? JSON.stringify(body) : undefined,
+    body: form ? body : body ? JSON.stringify(body) : undefined,
   })
   if (res.status === 401) clearToken()
   if (!res.ok) {
@@ -24,7 +26,18 @@ async function request(path, { method = 'GET', body } = {}) {
     }
     throw new ApiError(res.status, data, data ? flatten(data) : `${method} ${path} → ${res.status} ${text}`)
   }
+  if (raw) return res
   return res.status === 204 ? null : res.json()
+}
+
+// Downloads need the auth header, so fetch the file and hand the browser a blob.
+async function download(path) {
+  const res = await request(path, { raw: true })
+  const name = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? 'export.csv'
+  const url = URL.createObjectURL(await res.blob())
+  const a = Object.assign(document.createElement('a'), { href: url, download: name })
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 export class ApiError extends Error {
@@ -68,4 +81,8 @@ export const api = {
   goto: (runId, cue) => request(`/runs/${runId}/goto/`, { method: 'POST', body: { cue } }),
   reset: (runId) => request(`/runs/${runId}/reset/`, { method: 'POST' }),
   endRun: (runId) => request(`/runs/${runId}/end/`, { method: 'POST' }),
+  // body is FormData with file or text, mode, list and dry_run.
+  importCues: (id, form) => request(`/productions/${id}/cues/import/`, { method: 'POST', body: form }),
+  exportCues: (id) => download(`/productions/${id}/cues/export/`),
+  exportRun: (runId) => download(`/runs/${runId}/export/`),
 }

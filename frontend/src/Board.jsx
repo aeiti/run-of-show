@@ -3,6 +3,7 @@ import gsap from 'gsap'
 import { useGSAP } from '@gsap/react'
 import { api } from './api'
 import CueEditor from './board/CueEditor'
+import ImportDialog from './board/ImportDialog'
 import ProductionHeader from './board/ProductionHeader'
 import Playback from './board/Playback'
 import RunPanel from './board/RunPanel'
@@ -26,6 +27,7 @@ export default function Board({ productionId, runId, onBack, onSelectRun }) {
   const [busy, setBusy] = useState(false)
   const [playingBack, setPlayingBack] = useState(false)
   const [error, setError] = useState('')
+  const [importing, setImporting] = useState(false)
 
   const scope = useRef(null)
   const cardRefs = useRef([])
@@ -113,7 +115,9 @@ export default function Board({ productionId, runId, onBack, onSelectRun }) {
       cardRefs.current.length = cueList.length
       applyStates(states, playIdx, 0)
       gsap.from('.track', { scaleX: 0, transformOrigin: 'left center', duration: 0.6, ease: 'power3.out' })
-      gsap.from('.cue-list > li', { y: 28, autoAlpha: 0, duration: 0.5, ease: 'power3.out', stagger: 0.05 })
+      // A real show has hundreds of cues: keep the whole entrance under a second.
+      const each = Math.min(0.05, 1 / cueList.length)
+      gsap.from('.cue-list > li', { y: 28, autoAlpha: 0, duration: 0.5, ease: 'power3.out', stagger: each })
     },
     { dependencies: [loaded, live], scope },
   )
@@ -284,13 +288,26 @@ export default function Board({ productionId, runId, onBack, onSelectRun }) {
             {cues && cues.length === 0 && <li className="muted">No cues yet. Switch to Edit to add some.</li>}
           </ol>
         ) : (
-          <CueEditor
-            cues={cueList}
-            productionId={productionId}
-            onSaved={(saved) => afterCueChange(cueList.map((c) => (c.id === saved.id ? saved : c)))}
-            onCreated={(created) => afterCueChange([...cueList, created])}
-            onDeleted={(id) => afterCueChange(cueList.filter((c) => c.id !== id))}
-          />
+          <div className="edit-pane">
+            <div className="row edit-tools">
+              <button className="ghost small" onClick={() => setImporting(true)}>
+                Import CSV…
+              </button>
+              <button
+                className="ghost small"
+                onClick={() => api.exportCues(productionId).catch((e) => setError(e.message))}
+              >
+                Export CSV
+              </button>
+            </div>
+            <CueEditor
+              cues={cueList}
+              productionId={productionId}
+              onSaved={(saved) => afterCueChange(cueList.map((c) => (c.id === saved.id ? saved : c)))}
+              onCreated={(created) => afterCueChange([...cueList, created])}
+              onDeleted={(id) => afterCueChange(cueList.filter((c) => c.id !== id))}
+            />
+          </div>
         )}
 
         <aside className="controls">
@@ -327,10 +344,31 @@ export default function Board({ productionId, runId, onBack, onSelectRun }) {
             </p>
           )}
 
-          <RunPanel runs={runs} run={run} onSelect={onSelectRun} onCreate={createRun} onEnd={endRun} />
+          <RunPanel
+            runs={runs}
+            run={run}
+            onSelect={onSelectRun}
+            onCreate={createRun}
+            onEnd={endRun}
+            onExport={(id) => api.exportRun(id).catch((e) => setError(e.message))}
+          />
           {error && <p className="error">{error}</p>}
         </aside>
       </div>
+      {importing && (
+        <ImportDialog
+          productionId={productionId}
+          onClose={() => setImporting(false)}
+          onImported={async () => {
+            setImporting(false)
+            try {
+              await afterCueChange(await api.cues(productionId))
+            } catch (err) {
+              setError(err.message)
+            }
+          }}
+        />
+      )}
     </main>
   )
 }

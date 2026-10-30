@@ -1,9 +1,11 @@
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
+from django.utils.text import slugify
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from . import services
+from . import csv_io, services
 from .models import Cue, Production, Run
 from .serializers import (
     CueEventSerializer,
@@ -37,6 +39,34 @@ class ProductionViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save(production=production)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="cues/import")
+    def import_cues(self, request, pk=None):
+        """Upload (``file``) or paste (``text``) a cue list. ``dry_run`` defaults to true."""
+        production = self.get_object()
+        upload = request.FILES.get("file")
+        text = upload.read() if upload else request.data.get("text", "")
+        dry_run = str(request.data.get("dry_run", "true")).lower() != "false"
+        try:
+            # Always planned against the current cue list, never a plan sent by the client.
+            planned = csv_io.plan(
+                production,
+                text,
+                mode=request.data.get("mode", "merge"),
+                eos_list=request.data.get("list") or None,
+            )
+        except csv_io.CsvImportError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        if not dry_run:
+            if planned["summary"] is None:
+                return Response({"detail": "Choose which Eos cue list to import."}, status=status.HTTP_400_BAD_REQUEST)
+            csv_io.apply(production, planned)
+        return Response({**csv_io.public(planned), "applied": not dry_run})
+
+    @action(detail=True, methods=["get"], url_path="cues/export")
+    def export_cues(self, request, pk=None):
+        production = self.get_object()
+        return csv_response(csv_io.export_cues(production), f"{slugify(production.name)}-cues.csv")
 
     @action(detail=True, methods=["get", "post"])
     def runs(self, request, pk=None):
@@ -110,7 +140,19 @@ class RunViewSet(mixins.RetrieveModelMixin, mixins.UpdateModelMixin, viewsets.Ge
     def reset(self, request, pk=None):
         return self._act(request, pk, services.reset)
 
+    @action(detail=True, methods=["get"])
+    def export(self, request, pk=None):
+        run = get_object_or_404(self.get_queryset(), pk=pk)
+        name = f"{slugify(run.production.name)}-{slugify(run.label)}-log.csv"
+        return csv_response(csv_io.export_run(run), name)
+
     @action(detail=True, methods=["post"])
     def end(self, request, pk=None):
         run = get_object_or_404(self.get_queryset(), pk=pk)
         return Response(RunSerializer(services.end(run)).data)
+
+
+def csv_response(body, filename):
+    response = HttpResponse(body, content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="{filename}"'
+    return response

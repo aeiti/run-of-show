@@ -147,3 +147,6 @@ REST_FRAMEWORK = {
 CORS_ALLOWED_ORIGINS = [
     o for o in os.environ.get('CORS_ALLOWED_ORIGINS', 'http://localhost:5173').split(',') if o
 ]
+# Let the frontend read the download filename on CSV exports (cross-origin fetch
+# hides non-safelisted response headers otherwise).
+CORS_EXPOSE_HEADERS = ['Content-Disposition']

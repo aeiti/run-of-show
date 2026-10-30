@@ -6,7 +6,7 @@ const runName = (r) =>
   [r.label, r.kind, new Date(r.created_at).toLocaleDateString(), r.ended_at && 'ended'].filter(Boolean).join(' · ')
 
 /** Pick, start or end a run, and show its log. */
-export default function RunPanel({ runs, run, onSelect, onCreate, onEnd }) {
+export default function RunPanel({ runs, run, onSelect, onCreate, onEnd, onExport }) {
   const [creating, setCreating] = useState(false)
   const [draft, setDraft] = useState({ label: '', kind: 'rehearsal' })
   const [confirmEnd, setConfirmEnd] = useState(false)
@@ -81,7 +81,14 @@ export default function RunPanel({ runs, run, onSelect, onCreate, onEnd }) {
         )
       )}
 
-      <h3>Log · {run?.label}</h3>
+      <div className="row-between">
+        <h3>Log · {run?.label}</h3>
+        {run && (
+          <button className="ghost small" onClick={() => onExport(run.id)}>
+            Export
+          </button>
+        )}
+      </div>
       <ol className="log">
         {events.length === 0 && <li className="muted">Nothing fired in this run yet.</li>}
         {events.map((e) => (

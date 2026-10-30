@@ -43,7 +43,10 @@ export default function Transport({
           className="goto"
           onSubmit={(e) => {
             e.preventDefault()
-            if (gotoTarget) onAction('goto', gotoTarget.id)
+            if (!gotoTarget) return
+            onAction('goto', gotoTarget.id)
+            // Hand the keyboard back to the board so the next Space is GO, not a typed space.
+            gotoRef.current?.blur()
           }}
         >
           <input
