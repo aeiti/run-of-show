@@ -1,3 +1,6 @@
+# Development stack: `docker compose up --build` runs the database, the API on
+# http://localhost:8000 and the board on http://localhost:5173. `docker compose
+# up db` runs only the database, for a backend and frontend run on the host.
 services:
   db:
     image: postgres:17
@@ -14,5 +17,37 @@ services:
       interval: 2s
       retries: 15
 
+  backend:
+    build: ./backend
+    environment:
+      POSTGRES_HOST: db
+      DJANGO_DEBUG: "1"
+      MEDIA_ROOT: /app/media
+      CORS_ALLOWED_ORIGINS: http://localhost:5173
+      FRONTEND_URL: http://localhost:5173
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app/backend
+      - media:/app/media
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    environment:
+      # The browser calls the API, so this is the host's address, not the container's.
+      VITE_API_URL: http://localhost:8000/api
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app/frontend
+      # Keep the image's node_modules (built for Linux) over the host's.
+      - /app/frontend/node_modules
+    depends_on:
+      - backend
+
 volumes:
   pgdata:
+  media:

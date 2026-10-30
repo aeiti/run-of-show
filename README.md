@@ -12,12 +12,22 @@ A theatrical cue-calling tool. You build a cue list for a production (by hand, o
 
 ## Running it
 
+**Everything in Docker**
+
+```bash
+docker compose up -d --build
+```
+
+This runs the database, the API at http://localhost:8000 and the board at http://localhost:5173. The source folders are mounted into the containers, so edits reload as they do on the host. The API applies migrations each time it starts, so after pulling, `docker compose up -d --build` (or `docker compose restart backend`) is enough; rebuild when `requirements.txt` or `package.json` change. Run management commands inside the container, e.g. `docker compose exec backend python manage.py seed_demo`. Uploaded files are kept in the `media` volume.
+
+**Or on the host**
+
 You need Docker, Python 3.12, and Node 20.19+ or 22.12+.
 
 **Database**
 
 ```bash
-docker compose up -d --wait
+docker compose up -d --wait db
 ```
 
 **Backend** (http://localhost:8000)
