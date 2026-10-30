@@ -16,6 +16,9 @@ def check_password(password, user=None):
 
 
 def check_email_free(email, user=None):
+    """Emails are unique regardless of case. Any number of accounts may have none."""
+    if not email:
+        return ""
     clash = User.objects.filter(email__iexact=email)
     if user is not None:
         clash = clash.exclude(pk=user.pk)
@@ -42,10 +45,6 @@ class MeSerializer(serializers.ModelSerializer):
         return super().to_representation(user)
 
     def validate_email(self, value):
-        # An admin may have set an email another account shares (or none);
-        # resending it unchanged with the profile form isn't a new clash.
-        if value.lower() == self.instance.email.lower():
-            return value
         return check_email_free(value, self.instance)
 
     def validate_preferences(self, value):
@@ -69,10 +68,10 @@ class MeSerializer(serializers.ModelSerializer):
 class AdminUserSerializer(serializers.ModelSerializer):
     """A user as an admin manages them. ``is_active`` false means suspended.
 
-    Admins aren't held to the self-service rules: the email only has to look
-    like an email address, may be shared with another account, and may be
-    null (no email; stored as ""). A password can be anything but empty,
-    without Django's strength validators.
+    Admins aren't held to the self-service password rules: a password can be
+    anything but empty, without Django's strength validators. The email must
+    be well-formed and not used by another account, or null for none (stored
+    as "").
     """
 
     email = serializers.EmailField(max_length=254, allow_blank=True, allow_null=True, required=False)
@@ -115,7 +114,7 @@ class AdminUserSerializer(serializers.ModelSerializer):
 
     def validate_email(self, value):
         # Django keeps "no email" as "", not NULL.
-        return value or ""
+        return check_email_free(value or "", self.instance)
 
     def validate(self, data):
         if self.instance is None and "password" not in data:

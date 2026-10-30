@@ -142,28 +142,31 @@ def test_admin_sets_any_non_empty_password(admin, bob):
 
 
 @pytest.mark.django_db
-def test_admin_sets_any_well_formed_email_or_none(admin, bob):
+def test_admin_sets_any_unused_well_formed_email_or_none(admin, bob):
     client = signed_in(admin)
     url = f"{URL}{bob.id}/"
 
-    # Shared with another account is fine for an admin.
-    assert client.patch(url, {"email": "ROOT@example.com"}, format="json").data["email"] == "ROOT@example.com"
+    assert client.patch(url, {"email": "Bob.Crew@example.com"}, format="json").data["email"] == "Bob.Crew@example.com"
+    # Another account's email is refused, whatever its case.
+    assert client.patch(url, {"email": "ROOT@example.com"}, format="json").status_code == 400
+    assert client.post(URL, {"username": "dup", "email": "root@EXAMPLE.com", "password": "x"}, format="json").status_code == 400
+    for bad in ("not-an-email", "bob@", "@example.com", "bob example.com"):
+        assert client.patch(url, {"email": bad}, format="json").status_code == 400, bad
+
     for cleared in (None, ""):
         assert client.patch(url, {"email": cleared}, format="json").data["email"] is None
         bob.refresh_from_db()
         assert bob.email == ""
-
-    for bad in ("not-an-email", "bob@", "@example.com", "bob example.com"):
-        assert client.patch(url, {"email": bad}, format="json").status_code == 400, bad
+    # No email is never a clash: any number of accounts can have none.
+    assert client.post(URL, {"username": "dan", "email": None, "password": "x"}, format="json").status_code == 201
+    assert client.post(URL, {"username": "eve", "email": "", "password": "x"}, format="json").status_code == 201
     # No email means no reset link.
     assert client.post(f"{url}send-reset/").status_code == 400
 
 
 @pytest.mark.django_db
-def test_user_with_an_admin_set_shared_email_can_still_save_their_profile(admin, bob):
-    signed_in(admin).patch(f"{URL}{bob.id}/", {"email": "root@example.com"}, format="json")
-    me = signed_in(bob).patch("/api/auth/me/", {"display_name": "Bob", "email": "root@example.com"}, format="json")
-    assert me.status_code == 200
-    # Choosing someone else's email themselves is still refused.
-    User.objects.create_user(username="carol", email="carol@example.com", password=PASSWORD)
-    assert signed_in(bob).patch("/api/auth/me/", {"email": "carol@example.com"}, format="json").status_code == 400
+def test_users_can_clear_their_own_email_when_others_have_none(admin, bob):
+    signed_in(admin).patch(f"{URL}{admin.id}/", {"email": None}, format="json")
+    assert signed_in(bob).patch("/api/auth/me/", {"email": ""}, format="json").status_code == 200
+    bob.refresh_from_db()
+    assert bob.email == ""
