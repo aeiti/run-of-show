@@ -184,9 +184,13 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAuthenticated',
     ],
-    # Only views with a throttle_scope are throttled: sign-in, sign-up and passwords.
+    # Only views with a throttle_scope are throttled: sign-in, sign-up and
+    # passwords, and emailing a show report (per user, since it sends mail).
     'DEFAULT_THROTTLE_CLASSES': ['rest_framework.throttling.ScopedRateThrottle'],
-    'DEFAULT_THROTTLE_RATES': {'auth': os.environ.get('AUTH_THROTTLE_RATE', '20/min')},
+    'DEFAULT_THROTTLE_RATES': {
+        'auth': os.environ.get('AUTH_THROTTLE_RATE', '20/min'),
+        'report_email': os.environ.get('REPORT_EMAIL_THROTTLE_RATE', '10/hour'),
+    },
 }
 
 # Password reset emails link here. In development they are printed to the

@@ -133,6 +133,8 @@ export const api = {
   runs: (id) => request(`/productions/${id}/runs/`),
   createRun: (id, data) => request(`/productions/${id}/runs/`, { method: 'POST', body: data }),
   run: (runId) => request(`/runs/${runId}/`),
+  // Label, kind, notes, scheduled_start; started_at and ended_at to correct them after the fact.
+  updateRun: (runId, data) => request(`/runs/${runId}/`, { method: 'PATCH', body: data }),
   // Operator actions return { event, state }.
   go: (runId, cue) => request(`/runs/${runId}/go/`, { method: 'POST', body: cue ? { cue } : {} }),
   back: (runId) => request(`/runs/${runId}/back/`, { method: 'POST' }),
@@ -145,6 +147,9 @@ export const api = {
   updateCueNote: (noteId, data) => request(`/cue-notes/${noteId}/`, { method: 'PATCH', body: data }),
   deleteCueNote: (noteId) => request(`/cue-notes/${noteId}/`, { method: 'DELETE' }),
   endRun: (runId) => request(`/runs/${runId}/end/`, { method: 'POST' }),
+  // The show report (shows/report.py); emailing it takes a list of addresses.
+  report: (runId) => request(`/runs/${runId}/report/`),
+  emailReport: (runId, to) => request(`/runs/${runId}/report/email/`, { method: 'POST', body: { to } }),
   // body is FormData with file or text, mode, list and dry_run.
   importCues: (id, form) => request(`/productions/${id}/cues/import/`, { method: 'POST', body: form }),
   exportCues: (id) => download(`/productions/${id}/cues/export/`),

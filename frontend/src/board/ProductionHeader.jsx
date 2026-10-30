@@ -3,8 +3,9 @@ import { api } from '../api'
 import { can, ROLES } from '../access'
 import ProductionLogo from '../ProductionLogo'
 import LogoField from './LogoField'
+import { formatDateRange } from '../dates'
 
-const FIELDS = ['name', 'company', 'venue', 'performance_date', 'notes']
+const FIELDS = ['name', 'company', 'venue', 'opening_date', 'closing_date', 'notes']
 
 // onScript is null when there is no script to show.
 export default function ProductionHeader({ production, onSaved, onDeleted, onPeople, onFiles, onScript, scriptShown }) {
@@ -25,7 +26,8 @@ export default function ProductionHeader({ production, onSaved, onDeleted, onPeo
   async function save(e) {
     e.preventDefault()
     try {
-      onSaved(await api.updateProduction(production.id, { ...draft, performance_date: draft.performance_date || null }))
+      const dates = { opening_date: draft.opening_date || null, closing_date: draft.closing_date || null }
+      onSaved(await api.updateProduction(production.id, { ...draft, ...dates }))
       setEditing(false)
     } catch (err) {
       setError(err.message)
@@ -69,7 +71,9 @@ export default function ProductionHeader({ production, onSaved, onDeleted, onPeo
           </div>
         </div>
         <p className="muted">
-          {[production.company, production.venue, production.performance_date].filter(Boolean).join(' · ')}
+          {[production.company, production.venue, formatDateRange(production.opening_date, production.closing_date)]
+            .filter(Boolean)
+            .join(' · ')}
         </p>
         {production.role !== 'owner' && (
           <p className="muted shared-by">
@@ -99,8 +103,12 @@ export default function ProductionHeader({ production, onSaved, onDeleted, onPeo
           <input {...field('venue')} />
         </label>
         <label>
-          Performance date
-          <input type="date" {...field('performance_date')} />
+          Opens
+          <input type="date" {...field('opening_date')} />
+        </label>
+        <label>
+          Closes
+          <input type="date" min={draft.opening_date || undefined} {...field('closing_date')} />
         </label>
         <label className="span-all">
           Notes

@@ -52,6 +52,19 @@ class SecondsField(serializers.DecimalField):
         return format_number(value)
 
 
+def check_order(data, instance, first, last, message):
+    """Raise unless ``last`` is on or after ``first``, using the instance's value for a field not sent."""
+
+    def value(field):
+        if field in data:
+            return data[field]
+        return getattr(instance, field, None) if instance is not None else None
+
+    start, end = value(first), value(last)
+    if start is not None and end is not None and end < start:
+        raise serializers.ValidationError({last: message})
+
+
 class PersonSerializer(serializers.Serializer):
     """Another user as collaborators see them: no email."""
 
@@ -73,8 +86,15 @@ class ProductionSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Production
-        fields = ["id", "name", "company", "venue", "performance_date", "notes", "logo", "created_at", "owner", "role"]
+        fields = [
+            "id", "name", "company", "venue", "opening_date", "closing_date", "notes", "logo", "created_at", "owner",
+            "role",
+        ]
         read_only_fields = ["id", "created_at"]
+
+    def validate(self, data):
+        check_order(data, self.instance, "opening_date", "closing_date", "The closing date can't be before the opening date.")
+        return data
 
     def get_role(self, production):
         return role_for(production, self.context["request"].user)
@@ -188,10 +208,32 @@ class CueEventSerializer(serializers.ModelSerializer):
 
 
 class RunSerializer(serializers.ModelSerializer):
+    """A run's details. ``started_at`` is set by the first GO and ``ended_at`` by
+    "End run"; after that an operator can correct either of them."""
+
     class Meta:
         model = Run
-        fields = ["id", "production", "label", "kind", "created_at", "ended_at", "notes"]
-        read_only_fields = ["id", "production", "created_at", "ended_at"]
+        fields = ["id", "production", "label", "kind", "created_at", "scheduled_start", "started_at", "ended_at", "notes"]
+        read_only_fields = ["id", "production", "created_at"]
+
+    def validate_started_at(self, value):
+        if self.instance is None and value is not None:
+            raise serializers.ValidationError("A run's start is recorded by its first GO.")
+        return value
+
+    def validate_ended_at(self, value):
+        # Ending a run goes through "End run", which also stops cue actions;
+        # here an operator only corrects when an ended run ended.
+        ended = self.instance is not None and self.instance.ended_at is not None
+        if not ended and value is not None:
+            raise serializers.ValidationError("Use End run to end a run.")
+        if ended and value is None:
+            raise serializers.ValidationError("An ended run can't be reopened.")
+        return value
+
+    def validate(self, data):
+        check_order(data, self.instance, "started_at", "ended_at", "A run can't end before it starts.")
+        return data
 
     def validate_label(self, value):
         production = self.context.get("production") or getattr(self.instance, "production", None)
@@ -301,11 +343,36 @@ class OptionalCueTargetSerializer(serializers.Serializer):
     cue = serializers.IntegerField(required=False, allow_null=True)
 
 
+# A show report goes to the production team, not a mailing list.
+MAX_REPORT_RECIPIENTS = 10
+
+
+class ReportEmailSerializer(serializers.Serializer):
+    """Who to email a run's report to: ``to`` is a list of addresses."""
+
+    to = serializers.ListField(
+        child=serializers.EmailField(max_length=254),
+        allow_empty=False,
+        max_length=MAX_REPORT_RECIPIENTS,
+        error_messages={"max_length": f"Send the report to at most {MAX_REPORT_RECIPIENTS} addresses at a time."},
+    )
+
+    def validate_to(self, addresses):
+        # The same address typed twice gets one email.
+        unique = {}
+        for address in addresses:
+            unique.setdefault(address.strip().lower(), address.strip())
+        return list(unique.values())
+
+
 # Whole-production backup (see backup.py). The same serializers write the
 # file and read it back, so an export always imports.
 
 BACKUP_FORMAT = "run-of-show/production"
-BACKUP_VERSION = 1
+# Version 2 replaced the production's ``performance_date`` with opening and
+# closing dates, and added the runs' scheduled and actual start. Version 1
+# files still import: their performance date becomes the opening date.
+BACKUP_VERSION = 2
 
 
 class BackupProductionSerializer(serializers.ModelSerializer):
@@ -313,7 +380,11 @@ class BackupProductionSerializer(serializers.ModelSerializer):
     # is asking, not to the production file.
     class Meta:
         model = Production
-        fields = ["name", "company", "venue", "performance_date", "notes"]
+        fields = ["name", "company", "venue", "opening_date", "closing_date", "notes"]
+
+    def validate(self, data):
+        check_order(data, None, "opening_date", "closing_date", "The closing date can't be before the opening date.")
+        return data
 
 
 class BackupCueSerializer(CueSerializer):
@@ -359,7 +430,11 @@ class BackupRunSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Run
-        fields = ["label", "kind", "created_at", "ended_at", "notes", "events", "cue_notes"]
+        fields = ["label", "kind", "created_at", "scheduled_start", "started_at", "ended_at", "notes", "events", "cue_notes"]
+
+    def validate(self, data):
+        check_order(data, None, "started_at", "ended_at", "A run can't end before it starts.")
+        return data
 
 
 class BackupLogoSerializer(serializers.Serializer):
@@ -396,6 +471,8 @@ class BackupSerializer(serializers.Serializer):
         version = data.get("version")
         if not isinstance(version, int) or not 1 <= version <= BACKUP_VERSION:
             raise serializers.ValidationError({"detail": f"Version {version} files need a newer version of Run of Show."})
+        if version == 1:
+            data = upgrade_v1(data)
         return super().to_internal_value(data)
 
     def validate_cues(self, cues):
@@ -421,6 +498,16 @@ class BackupSerializer(serializers.Serializer):
                             {"runs": f"{run['label']} links {kind} to cue {format_number(linked)}, which isn't in the file."}
                         )
         return data
+
+
+def upgrade_v1(data):
+    """A version 1 file as version 2: its one performance date was the opening."""
+    production = data.get("production")
+    if isinstance(production, dict) and "performance_date" in production:
+        production = {k: v for k, v in production.items() if k != "performance_date"}
+        production["opening_date"] = data["production"]["performance_date"]
+        data = {**data, "production": production}
+    return data
 
 
 def repeats(values):

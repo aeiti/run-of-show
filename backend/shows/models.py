@@ -24,7 +24,9 @@ class Production(models.Model):
     name = models.CharField(max_length=200)
     company = models.CharField(max_length=200, blank=True)
     venue = models.CharField(max_length=200, blank=True)
-    performance_date = models.DateField(null=True, blank=True)
+    # The run of the show: first and last performance. Either may be unknown.
+    opening_date = models.DateField(null=True, blank=True)
+    closing_date = models.DateField(null=True, blank=True)
     notes = models.TextField(blank=True)
     # An optional PNG, JPEG, GIF or WebP, set through /productions/{id}/logo/.
     logo = models.FileField(upload_to=production_logo_path, blank=True, max_length=500)
@@ -32,6 +34,14 @@ class Production(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(closing_date__isnull=True)
+                | models.Q(opening_date__isnull=True)
+                | models.Q(closing_date__gte=models.F("opening_date")),
+                name="closing_not_before_opening",
+            ),
+        ]
 
     def __str__(self):
         return self.name
@@ -122,14 +132,29 @@ class Run(models.Model):
     production = models.ForeignKey(Production, on_delete=models.CASCADE, related_name="runs")
     label = models.CharField(max_length=100)
     kind = models.CharField(max_length=20, choices=Kind.choices, default=Kind.OTHER)
+    # When the record was made, which is not when the run happened.
     created_at = models.DateTimeField(auto_now_add=True)
+    # The planned start ("curtain 19:30"), if one was set.
+    scheduled_start = models.DateTimeField(null=True, blank=True)
+    # The actual start and end. ``started_at`` is set by the first cue action
+    # (not a hold) and ``ended_at`` by "End run"; operators can correct both.
+    started_at = models.DateTimeField(null=True, blank=True)
     ended_at = models.DateTimeField(null=True, blank=True)
     notes = models.TextField(blank=True)
 
     class Meta:
+        # Newest record first. Not by scheduled start: runs booked ahead of
+        # time would then sit above the one being run tonight, and the board
+        # opens the first run in this order.
         ordering = ["-created_at"]
         constraints = [
             models.UniqueConstraint(fields=["production", "label"], name="unique_run_label"),
+            models.CheckConstraint(
+                condition=models.Q(ended_at__isnull=True)
+                | models.Q(started_at__isnull=True)
+                | models.Q(ended_at__gte=models.F("started_at")),
+                name="run_ends_after_start",
+            ),
         ]
 
     def __str__(self):

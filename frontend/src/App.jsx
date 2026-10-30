@@ -4,6 +4,7 @@ import { ApiError, api, clearToken, getToken, logout } from './api'
 import Login from './Login'
 import Productions from './Productions'
 import Board from './Board'
+import Report from './report/Report'
 import Signup from './account/Signup'
 import Profile from './account/Profile'
 import Users from './admin/Users'
@@ -81,6 +82,7 @@ export default function App() {
           path="/productions/:productionId/runs/:runId"
           element={<BoardRoute me={me} onSignedOut={sessionEnded} />}
         />
+        <Route path="/productions/:productionId/runs/:runId/report" element={<ReportRoute />} />
         {reset}
         <Route path="/signup" element={<Navigate to="/" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -92,6 +94,11 @@ export default function App() {
 function ProductionsRoute() {
   const navigate = useNavigate()
   return <Productions onOpen={(id) => navigate(`/productions/${id}`)} />
+}
+
+function ReportRoute() {
+  const { productionId, runId } = useParams()
+  return <Report key={runId} productionId={Number(productionId)} runId={Number(runId)} />
 }
 
 function BoardRoute({ me, onSignedOut }) {

@@ -202,7 +202,15 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
   const applyEvent = contextSafe((event, state) => {
     if (seenEvents.current.has(event.id)) return
     seenEvents.current.add(event.id)
-    setRun((prev) => ({ ...prev, events: [...prev.events, event], state }))
+    // The first GO or GOTO starts the run; the server records the same time.
+    const starts = !run?.started_at && (event.action === 'go' || event.action === 'goto')
+    setRun((prev) => ({
+      ...prev,
+      events: [...prev.events, event],
+      state,
+      ...(starts && { started_at: event.fired_at }),
+    }))
+    if (starts) setRuns((prev) => prev.map((r) => (r.id === event.run ? { ...r, started_at: event.fired_at } : r)))
     // A hold or resume leaves the cues (and the loaded cue) as they are.
     if (event.action === 'hold' || event.action === 'resume') return
     // Someone fired the cue this screen had loaded: nothing left to load.
@@ -269,6 +277,19 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
       setLoadedCue(null)
     } catch (err) {
       setError(err.message)
+    }
+  }
+
+  // Corrected times; resolves to whether it saved.
+  async function updateRun(data) {
+    try {
+      const updated = await api.updateRun(run.id, data)
+      setRun((prev) => ({ ...prev, ...updated }))
+      setRuns((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
+      return true
+    } catch (err) {
+      setError(err.message)
+      return false
     }
   }
 
@@ -590,6 +611,7 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
             onSelect={onSelectRun}
             onCreate={createRun}
             onEnd={endRun}
+            onUpdate={updateRun}
             onExport={(id) => api.exportRun(id).catch((e) => setError(e.message))}
           />
           {error && <p className="error">{error}</p>}

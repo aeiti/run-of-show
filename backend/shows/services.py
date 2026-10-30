@@ -7,6 +7,10 @@ that event, so they still work if the active cue was renumbered or deleted.
 A HOLD pauses the run with a reason until a RESUME. Both are logged with the
 cue that was active, but neither moves it, and no cue action is accepted while
 the run is held. Ending a held run is allowed; the hold then lasts until the end.
+
+The first GO or GOTO records when the run started (``Run.started_at``), unless
+an operator has already set it. A hold, a reset or a step back doesn't: none
+of them fires a cue, and a hold before the top of the show is a late start.
 """
 
 from django.db import transaction
@@ -24,6 +28,8 @@ class RunActionError(Exception):
 # The actions that move the active cue. Holds and resumes only record it.
 CUE_ACTIONS = [CueEvent.Action.GO, CueEvent.Action.BACK, CueEvent.Action.GOTO, CueEvent.Action.RESET]
 HOLD_ACTIONS = [CueEvent.Action.HOLD, CueEvent.Action.RESUME]
+# The actions that fire a cue, so the first of them starts the run.
+STARTS = [CueEvent.Action.GO, CueEvent.Action.GOTO]
 
 
 def active_number(run):
@@ -56,13 +62,17 @@ def run_state(run):
 
 
 def _record(run, action, cue):
-    return CueEvent.objects.create(
+    event = CueEvent.objects.create(
         run=run,
         action=action,
         cue=cue,
         cue_number=cue.number if cue else None,
         cue_label=cue.label if cue else "",
     )
+    if action in STARTS and run.started_at is None:
+        run.started_at = event.fired_at
+        run.save(update_fields=["started_at"])
+    return event
 
 
 def _locked(run, held_ok=False):

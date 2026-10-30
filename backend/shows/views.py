@@ -1,6 +1,8 @@
 import json
 import os
 
+from django.conf import settings
+from django.core.mail import EmailMultiAlternatives, get_connection
 from django.db import transaction
 from django.db.models import Max
 from django.http import FileResponse, HttpResponse, JsonResponse
@@ -9,7 +11,7 @@ from rest_framework import mixins, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from . import backup, csv_io, live, services, uploads
+from . import backup, csv_io, live, report, services, uploads
 from .access import ProductionRole, visible_productions
 from .models import Cue, CueNote, Membership, Production, ProductionFile, Run
 from .serializers import (
@@ -27,6 +29,7 @@ from .serializers import (
     ProductionSerializer,
     RunDetailSerializer,
     RunSerializer,
+    ReportEmailSerializer,
     RunStateSerializer,
 )
 
@@ -276,6 +279,8 @@ class RunViewSet(LiveUpdates, mixins.RetrieveModelMixin, mixins.UpdateModelMixin
     """Runs are history, so there is no delete. Operator actions append events."""
 
     permission_classes = ROLE_PERMISSIONS
+    # Unthrottled, except the actions that set their own scope (emailing a report).
+    throttle_scope = None
     capabilities = {
         "update": "operate",
         "partial_update": "operate",
@@ -287,6 +292,7 @@ class RunViewSet(LiveUpdates, mixins.RetrieveModelMixin, mixins.UpdateModelMixin
         "resume": "operate",
         "cue_notes": "operate",
         "end": "operate",
+        "email_report": "operate",
     }
     live_topics = {
         "update": "runs",
@@ -377,6 +383,30 @@ class RunViewSet(LiveUpdates, mixins.RetrieveModelMixin, mixins.UpdateModelMixin
         run = self.get_object()
         name = f"{slugify(run.production.name)}-{slugify(run.label)}-log.csv"
         return csv_response(csv_io.export_run(run), name)
+
+    @action(detail=True, methods=["get"])
+    def report(self, request, pk=None):
+        """The show report: times, holds, scene lengths and notes (see report.py)."""
+        return Response(report.build(self.get_object()))
+
+    @action(detail=True, methods=["post"], url_path="report/email", throttle_scope="report_email")
+    def email_report(self, request, pk=None):
+        """Email the report, as text and HTML, to ``to`` (a list of addresses). One email each."""
+        run = self.get_object()
+        body = ReportEmailSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        to = body.validated_data["to"]
+
+        built = report.build(run)
+        subject, text, html = report.subject(built), report.as_text(built), report.as_html(built)
+        reply_to = [request.user.email] if request.user.email else None
+        messages = []
+        for address in to:
+            message = EmailMultiAlternatives(subject, text, settings.DEFAULT_FROM_EMAIL, [address], reply_to=reply_to)
+            message.attach_alternative(html, "text/html")
+            messages.append(message)
+        get_connection().send_messages(messages)
+        return Response({"sent": len(messages), "to": to})
 
     @action(detail=True, methods=["post"])
     def end(self, request, pk=None):
