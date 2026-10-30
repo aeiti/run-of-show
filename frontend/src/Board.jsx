@@ -67,7 +67,7 @@ export default function Board({ productionId, runId, onBack, onSelectRun }) {
     return () => ro.disconnect()
   }, [loaded])
   const labels = useMemo(() => trackLabels(cueList, trackWidth), [cueList, trackWidth])
-  const scenes = useMemo(() => sceneSpans(cueList), [cueList])
+  const scenes = useMemo(() => sceneSpans(cueList, trackWidth), [cueList, trackWidth])
   const pct = (count) => `${(count / cueList.length) * 100}%`
 
   useEffect(() => {
@@ -287,7 +287,7 @@ export default function Board({ productionId, runId, onBack, onSelectRun }) {
             style={{ left: pct(s.start), width: pct(s.end - s.start) }}
             title={s.name}
           >
-            <span>{s.name}</span>
+            {s.labelled && <span>{s.name}</span>}
           </div>
         ))}
         <div className="track-fill" ref={fillRef} />
