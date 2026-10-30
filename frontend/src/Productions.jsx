@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from './api'
 
-const blank = { name: '', venue: '', performance_date: '' }
+const blank = { name: '', company: '', venue: '', performance_date: '' }
 
 export default function Productions({ onOpen }) {
   const [productions, setProductions] = useState([])
@@ -42,7 +42,7 @@ export default function Productions({ onOpen }) {
               <button onClick={() => onOpen(p.id)}>
                 <strong>{p.name}</strong>
                 <span className="muted">
-                  {[p.venue, p.performance_date].filter(Boolean).join(' · ')}
+                  {[p.company, p.venue, p.performance_date].filter(Boolean).join(' · ')}
                 </span>
               </button>
             </li>
@@ -54,6 +54,10 @@ export default function Productions({ onOpen }) {
         <label>
           Name
           <input required {...field('name')} />
+        </label>
+        <label>
+          Company
+          <input {...field('company')} />
         </label>
         <label>
           Venue

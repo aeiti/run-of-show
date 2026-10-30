@@ -20,7 +20,7 @@ h3 { font-size: 0.8rem; color: var(--muted); text-transform: uppercase; margin-t
 .muted { color: var(--muted); margin: 0; }
 .error { color: var(--err); font-size: 0.8rem; word-break: break-word; }
 
-button, input {
+button, input, textarea {
   font: inherit;
   color: inherit;
   background: #181b21;
@@ -37,6 +37,7 @@ label { display: grid; gap: 0.3rem; font-size: 0.8rem; color: var(--muted); marg
 
 .shell { max-width: 1100px; margin: 0 auto; padding: 1rem; }
 .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; }
+.brand { color: inherit; text-decoration: none; }
 .brand, h1 { background: none; border: 0; padding: 0; font-weight: 700; letter-spacing: 0.15em; }
 .brand span, h1 span { color: var(--go); margin: 0 0.2em; }
 .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 1.25rem; }
@@ -48,7 +49,23 @@ label { display: grid; gap: 0.3rem; font-size: 0.8rem; color: var(--muted); marg
 .production-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
 .production-list button { width: 100%; display: flex; justify-content: space-between; gap: 1rem; text-align: left; padding: 0.8rem 1rem; }
 
-.board-head { display: flex; gap: 1rem; align-items: center; margin-bottom: 1.25rem; }
+.board-head { display: flex; gap: 1rem; align-items: flex-start; margin-bottom: 1.25rem; }
+.production-header { flex: 1; min-width: 0; }
+.production-header.editing { padding: 1rem; }
+.production-notes { margin: 0.4rem 0 0; font-size: 0.8rem; color: var(--text); white-space: pre-wrap; }
+.row-between { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+.field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0 0.75rem; }
+.span-all { grid-column: 1 / -1; }
+textarea { width: 100%; resize: vertical; }
+.spacer { flex: 1; }
+.small { padding: 0.25rem 0.55rem; font-size: 0.75rem; }
+.small-print { font-size: 0.75rem; margin-top: 0.4rem; }
+.danger { color: var(--err); border-color: color-mix(in srgb, var(--err) 45%, transparent); }
+button.danger:not(.ghost) { background: #2a1214; }
+
+.mode-toggle { display: flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; flex: none; }
+.mode-toggle button { border: 0; border-radius: 0; background: transparent; letter-spacing: 0.12em; font-size: 0.75rem; padding: 0.45rem 0.9rem; }
+.mode-toggle button.on { background: #2a2f37; color: #fff; }
 
 /* Playhead track */
 .track { position: relative; height: 34px; border-bottom: 1px solid var(--line); margin-bottom: 1rem; }
@@ -67,6 +84,27 @@ label { display: grid; gap: 0.3rem; font-size: 0.8rem; color: var(--muted); marg
   padding: 0.7rem 0.9rem; border: 1px solid var(--line); border-radius: 4px; background: #14171c;
 }
 .cue-number { font-weight: 700; font-size: 1.05rem; }
+.cue-label { min-width: 0; }
+.cue-notes { display: block; color: var(--muted); font-size: 0.72rem; margin-top: 0.15rem; }
+.scene-divider {
+  font-size: 0.68rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--stby);
+  padding: 0.6rem 0.2rem 0.1rem; border-bottom: 1px dashed var(--line);
+}
+
+/* Edit mode */
+.cue-editor { min-width: 0; }
+.editor-head, .editor-row {
+  display: grid; grid-template-columns: 4.5rem minmax(8rem, 1.4fr) 3.2rem minmax(5rem, 0.8fr) minmax(8rem, 1.6fr) 4.8rem;
+  gap: 0.35rem; align-items: center;
+}
+.editor-head { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; padding: 0 0 0.3rem; }
+.editor-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.3rem; max-height: 62vh; overflow-y: auto; }
+.editor-row input { min-width: 0; padding: 0.4rem 0.5rem; }
+.editor-row input:not(:focus) { background: transparent; }
+.new-row { margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px solid var(--line); }
+.new-row input:not(:focus) { background: #181b21; }
+.row-error { grid-column: 1 / -1; margin: 0; }
+.edit-help { font-size: 0.8rem; line-height: 1.5; }
 .cue-page { color: var(--muted); font-size: 0.75rem; text-align: right; }
 .cue-status { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.12em; text-align: right; }
 .is-previewing .cue-status { visibility: hidden; }
@@ -91,5 +129,10 @@ label { display: grid; gap: 0.3rem; font-size: 0.8rem; color: var(--muted); marg
   .controls { position: static; order: -1; }
   .cue-inner { grid-template-columns: 3.5rem 1fr 3.5rem; }
   .cue-page { display: none; }
+  .board-head { flex-wrap: wrap; justify-content: space-between; }
+  .production-header { order: 3; flex-basis: 100%; }
+  .editor-head { display: none; }
+  /* Number, label, page on the first line; scene, notes and delete wrap below. */
+  .editor-row { grid-template-columns: 4rem 1fr 4.4rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--line); }
 }
 .log-action { color: var(--stby); font-weight: 700; }

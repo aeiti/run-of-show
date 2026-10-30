@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { flushSync } from 'react-dom'
 import gsap from 'gsap'
 import { useGSAP } from '@gsap/react'
 import { api } from './api'
+import CueEditor from './board/CueEditor'
+import ProductionHeader from './board/ProductionHeader'
+import { cueStates, playheadIndex, sortCues } from './board/state'
 
 gsap.registerPlugin(useGSAP)
 
@@ -20,7 +22,10 @@ const FLASH = {
   to: { boxShadow: '0 0 0 0px rgba(232, 183, 48, 0)', duration: 0.6, ease: 'power2.out' },
 }
 
-function stateAt(i, activeIdx) {
+const STATUS = { complete: 'DONE', active: 'GO', standby: 'STBY', pending: '' }
+
+// Preview runs through the list from the top: cue i active, i+1 standby.
+function previewState(i, activeIdx) {
   if (i < activeIdx) return 'complete'
   if (i === activeIdx) return 'active'
   if (i === activeIdx + 1) return 'standby'
@@ -35,10 +40,10 @@ export default function Board({ productionId, onBack }) {
   const [cues, setCues] = useState([])
   const [run, setRun] = useState(null)
   const [runDraft, setRunDraft] = useState('Run 1')
+  const [mode, setMode] = useState('live')
   const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
   const [previewing, setPreviewing] = useState(false)
-  const [newCue, setNewCue] = useState({ number: '', label: '', page: '' })
   const [error, setError] = useState('')
 
   const scope = useRef(null)
@@ -47,14 +52,12 @@ export default function Board({ productionId, onBack }) {
   const fillRef = useRef(null)
   const previewTl = useRef(null)
 
-  // The server decides the active and next cue; the board just finds them.
+  // The server decides the active and next cue; the board just looks them up.
   const events = run?.events ?? []
-  const activeIdx = useMemo(
-    () => cues.findIndex((c) => c.id === run?.state.active_cue),
-    [cues, run],
-  )
-  const nextIdx = useMemo(() => cues.findIndex((c) => c.id === run?.state.next_cue), [cues, run])
-  const done = cues.length > 0 && nextIdx === -1
+  const states = useMemo(() => cueStates(cues, run?.state), [cues, run])
+  const playIdx = useMemo(() => playheadIndex(cues, run?.state), [cues, run])
+  const nextCue = cues.find((c) => c.id === run?.state.next_cue)
+  const live = mode === 'live'
 
   // Open a run by label, creating it if this production doesn't have one yet.
   const openRun = useCallback(
@@ -78,41 +81,46 @@ export default function Board({ productionId, onBack }) {
 
   const { contextSafe } = useGSAP({ scope })
 
-  const applyStates = useCallback(
-    (idx, duration) => {
-      const n = cardRefs.current.length
-      cardRefs.current.forEach((card, i) => {
-        if (card) gsap.to(card, { ...LOOK[stateAt(i, idx)], duration, ease: 'power2.out' })
-      })
-      gsap.to(markerRef.current, { left: playheadPos(idx, n), duration, ease: 'power3.inOut' })
-      gsap.to(fillRef.current, { width: playheadPos(idx, n), duration, ease: 'power3.inOut' })
-    },
-    [],
-  )
+  const applyStates = useCallback((looks, idx, duration) => {
+    const n = looks.length
+    cardRefs.current.forEach((card, i) => {
+      if (card && looks[i]) gsap.to(card, { ...LOOK[looks[i]], duration, ease: 'power2.out' })
+    })
+    gsap.to(markerRef.current, { left: playheadPos(idx, n), duration, ease: 'power3.inOut' })
+    gsap.to(fillRef.current, { width: playheadPos(idx, n), duration, ease: 'power3.inOut' })
+  }, [])
 
-  // Entrance: set every card to its state for the current run, then stagger them in.
+  // Entrance, on first load and whenever the board returns to Live mode:
+  // set every card to its state for the current run, then stagger them in.
   useGSAP(
     () => {
-      if (!loaded) return
+      if (!loaded || !live) return
       cardRefs.current.length = cues.length
-      applyStates(activeIdx, 0)
+      applyStates(states, playIdx, 0)
       gsap.from('.track', { scaleX: 0, transformOrigin: 'left center', duration: 0.6, ease: 'power3.out' })
-      gsap.from('.cue-card', { y: 28, autoAlpha: 0, duration: 0.5, ease: 'power3.out', stagger: 0.06 })
+      gsap.from('.cue-list > li', { y: 28, autoAlpha: 0, duration: 0.5, ease: 'power3.out', stagger: 0.05 })
     },
-    { dependencies: [loaded], scope },
+    { dependencies: [loaded, live], scope },
   )
 
+  // Settle the cards whenever the run state or the cue list changes.
+  useEffect(() => {
+    if (loaded && live && !previewing) applyStates(states, playIdx, 0.4)
+  }, [loaded, live, previewing, states, playIdx, applyStates])
+
   const go = contextSafe(async () => {
-    if (busy || previewing || done || cues.length === 0) return
+    if (!live || busy || previewing || !nextCue) return
     setBusy(true)
     setError('')
     try {
       const { event, state } = await api.go(run.id)
       setRun((prev) => ({ ...prev, events: [...prev.events, event], state }))
-      // The settle effect below tweens the states; this adds the GO flash on top.
+      // The settle effect tweens the states; this adds the GO flash on top.
       const card = cardRefs.current[cues.findIndex((c) => c.id === state.active_cue)]
-      gsap.fromTo(card, FLASH.from, FLASH.to)
-      card.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      if (card) {
+        gsap.fromTo(card, FLASH.from, FLASH.to)
+        card.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      }
     } catch (e) {
       setError(e.message)
     } finally {
@@ -130,7 +138,7 @@ export default function Board({ productionId, onBack }) {
       defaults: { duration: 0.35, ease: 'power2.out' },
       onComplete: () => stopPreview(),
     })
-    cards.forEach((card, i) => tl.set(card, LOOK[stateAt(i, -1)], 0))
+    cards.forEach((card, i) => tl.set(card, LOOK[previewState(i, -1)], 0))
     tl.set(markerRef.current, { left: '0%' }, 0)
     tl.set(fillRef.current, { width: '0%' }, 0)
     cards.forEach((card, i) => {
@@ -153,11 +161,6 @@ export default function Board({ productionId, onBack }) {
     setPreviewing(false)
   })
 
-  // When preview ends (or the run changes), settle the board back to the recorded run.
-  useEffect(() => {
-    if (loaded && !previewing) applyStates(activeIdx, 0.4)
-  }, [loaded, previewing, activeIdx, cues, applyStates])
-
   async function loadRun(e) {
     e.preventDefault()
     const label = runDraft.trim()
@@ -169,32 +172,20 @@ export default function Board({ productionId, onBack }) {
     }
   }
 
-  const addCue = contextSafe(async (e) => {
-    e.preventDefault()
+  // Any cue edit can change which cue is next, so refresh the run state after it.
+  async function afterCueChange(nextCues) {
+    setCues(sortCues(nextCues))
     try {
-      const created = await api.createCue(productionId, {
-        number: newCue.number,
-        label: newCue.label,
-        page: newCue.page ? Number(newCue.page) : null,
-      })
-      // Cues are ordered by number, so a new cue can land anywhere in the list.
-      const sorted = [...cues, created].sort((a, b) => Number(a.number) - Number(b.number))
-      flushSync(() => setCues(sorted))
-      cardRefs.current.length = sorted.length
-      const i = sorted.indexOf(created)
-      gsap.from(cardRefs.current[i].parentElement, { y: 16, autoAlpha: 0, duration: 0.4, ease: 'power3.out' })
-      setNewCue({ number: '', label: '', page: '' })
-      // The next cue may have changed; refresh the run's state from the server.
       setRun(await api.run(run.id))
     } catch (err) {
       setError(err.message)
     }
-  })
+  }
 
   // Space bar is GO, like the button on a lighting desk.
   useEffect(() => {
     const onKey = (e) => {
-      if (e.code !== 'Space' || e.target.closest('input, button')) return
+      if (e.code !== 'Space' || e.target.closest('input, textarea, button')) return
       e.preventDefault()
       go()
     }
@@ -202,19 +193,25 @@ export default function Board({ productionId, onBack }) {
     return () => window.removeEventListener('keydown', onKey)
   }, [go])
 
-  const status = (i) => ({ complete: 'DONE', active: 'GO', standby: 'STBY', pending: '' })[stateAt(i, activeIdx)]
-
   return (
     <main className={`board ${previewing ? 'is-previewing' : ''}`} ref={scope}>
       <div className="board-head">
         <button className="ghost" onClick={onBack}>
           ← Productions
         </button>
-        <div>
-          <h2>{production?.name ?? '…'}</h2>
-          <p className="muted">
-            {[production?.venue, production?.performance_date].filter(Boolean).join(' · ')}
-          </p>
+        <ProductionHeader production={production} onSaved={setProduction} onDeleted={onBack} />
+        <div className="mode-toggle" role="group" aria-label="Board mode">
+          <button className={live ? 'on' : ''} aria-pressed={live} onClick={() => setMode('live')}>
+            Live
+          </button>
+          <button
+            className={live ? '' : 'on'}
+            aria-pressed={!live}
+            disabled={previewing}
+            onClick={() => setMode('edit')}
+          >
+            Edit
+          </button>
         </div>
       </div>
 
@@ -229,44 +226,69 @@ export default function Board({ productionId, onBack }) {
       </div>
 
       <div className="board-body">
-        <ol className="cue-list">
-          {cues.map((c, i) => (
-            <li key={c.id} className="cue-card">
-              <div className="cue-inner" ref={(el) => (cardRefs.current[i] = el)}>
-                <span className="cue-number">Q{c.number}</span>
-                <span className="cue-label">{c.label}</span>
-                <span className="cue-page">{c.page ? `p.${c.page}` : ''}</span>
-                <span className="cue-status">{status(i)}</span>
-              </div>
-            </li>
-          ))}
-          {loaded && cues.length === 0 && <li className="muted">No cues yet. Add one below.</li>}
-        </ol>
+        {live ? (
+          <ol className="cue-list">
+            {cues.map((c, i) => [
+              c.scene && (
+                <li key={`scene-${c.id}`} className="scene-divider">
+                  {c.scene}
+                </li>
+              ),
+              <li key={c.id} className="cue-card">
+                <div className="cue-inner" ref={(el) => (cardRefs.current[i] = el)}>
+                  <span className="cue-number">Q{c.number}</span>
+                  <span className="cue-label">
+                    {c.label}
+                    {c.notes && <small className="cue-notes">{c.notes}</small>}
+                  </span>
+                  <span className="cue-page">{c.page ? `p.${c.page}` : ''}</span>
+                  <span className="cue-status">{STATUS[states[i]]}</span>
+                </div>
+              </li>,
+            ])}
+            {loaded && cues.length === 0 && <li className="muted">No cues yet. Switch to Edit to add some.</li>}
+          </ol>
+        ) : (
+          <CueEditor
+            cues={cues}
+            productionId={productionId}
+            onSaved={(saved) => afterCueChange(cues.map((c) => (c.id === saved.id ? saved : c)))}
+            onCreated={(created) => afterCueChange([...cues, created])}
+            onDeleted={(id) => afterCueChange(cues.filter((c) => c.id !== id))}
+          />
+        )}
 
         <aside className="controls">
-          {previewing && <p className="preview-banner">PREVIEW · not recorded</p>}
-          <button className="go" onClick={go} disabled={busy || previewing || done || cues.length === 0}>
-            {done ? 'END' : 'GO'}
-          </button>
-          <p className="muted next">
-            {cues[nextIdx] ? `Next: Q${cues[nextIdx].number} ${cues[nextIdx].label}` : 'End of cue list'}
-          </p>
+          {live ? (
+            <>
+              {previewing && <p className="preview-banner">PREVIEW · not recorded</p>}
+              <button className="go" onClick={go} disabled={busy || previewing || !nextCue}>
+                {nextCue || cues.length === 0 ? 'GO' : 'END'}
+              </button>
+              <p className="muted next">{nextCue ? `Next: Q${nextCue.number} ${nextCue.label}` : 'End of cue list'}</p>
 
-          <form className="row" onSubmit={loadRun}>
-            <input value={runDraft} onChange={(e) => setRunDraft(e.target.value)} aria-label="Run label" />
-            <button type="submit" className="ghost">
-              Load run
-            </button>
-          </form>
+              <form className="row" onSubmit={loadRun}>
+                <input value={runDraft} onChange={(e) => setRunDraft(e.target.value)} aria-label="Run label" />
+                <button type="submit" className="ghost">
+                  Load run
+                </button>
+              </form>
 
-          {previewing ? (
-            <button className="ghost" onClick={stopPreview}>
-              Stop preview
-            </button>
+              {previewing ? (
+                <button className="ghost" onClick={stopPreview}>
+                  Stop preview
+                </button>
+              ) : (
+                <button className="ghost" onClick={preview} disabled={cues.length === 0}>
+                  Preview run
+                </button>
+              )}
+            </>
           ) : (
-            <button className="ghost" onClick={preview} disabled={cues.length === 0}>
-              Preview run
-            </button>
+            <p className="muted edit-help">
+              Editing the cue list. Enter or leaving a field saves it; Esc puts it back. The list stays in cue-number
+              order. Switch back to Live to run the show.
+            </p>
           )}
 
           <h3>Run log · {run?.label}</h3>
@@ -280,34 +302,6 @@ export default function Board({ productionId, onBack }) {
               </li>
             ))}
           </ol>
-
-          <form className="add-cue" onSubmit={addCue}>
-            <h3>Add cue</h3>
-            <div className="row">
-              <input
-                required
-                placeholder="#"
-                className="narrow"
-                value={newCue.number}
-                onChange={(e) => setNewCue({ ...newCue, number: e.target.value })}
-              />
-              <input
-                placeholder="Label"
-                value={newCue.label}
-                onChange={(e) => setNewCue({ ...newCue, label: e.target.value })}
-              />
-              <input
-                placeholder="pg"
-                className="narrow"
-                inputMode="numeric"
-                value={newCue.page}
-                onChange={(e) => setNewCue({ ...newCue, page: e.target.value })}
-              />
-              <button type="submit" className="ghost">
-                Add
-              </button>
-            </div>
-          </form>
           {error && <p className="error">{error}</p>}
         </aside>
       </div>
