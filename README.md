@@ -85,7 +85,13 @@ The tests in `backend/shows/tests.py` cover: actions add events without changing
 
 ## Frontend
 
-Two screens, with URLs that survive a reload (React Router): the productions list at `/`, and the run-of-show board for one production at `/productions/{id}` (`frontend/src/Board.jsx`).
+Two screens, with URLs that survive a reload (React Router): the productions list at `/`, and the run-of-show board at `/productions/{id}/runs/{run}` (`frontend/src/Board.jsx`).
+
+Running a show (Live mode):
+
+- **GO** (or Space) fires the next cue. **Clicking a cue loads it**: it becomes the cue GO will fire, and nothing fires until GO. ↑ and ↓ move the load; Esc clears it.
+- **BACK** (B or ←) steps to the previous cue. **GOTO** fires the cue whose number is typed in its box (G jumps to the box). **RESET** clears the active cue. All three are recorded in the log alongside GOs.
+- The **run picker** switches between runs, starts a new one (label and kind), or ends the current one. An ended run is read-only.
 
 The board has two modes, like Live and Blind on a lighting console:
 

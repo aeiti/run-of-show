@@ -80,6 +80,7 @@ button.danger:not(.ghost) { background: #2a1214; }
 .board-body { display: grid; grid-template-columns: 1fr 300px; gap: 1rem; align-items: start; }
 .cue-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; max-height: 70vh; overflow-y: auto; overflow-x: hidden; padding: 8px; }
 .cue-inner {
+  width: 100%; text-align: left; cursor: pointer; font: inherit; color: inherit;
   display: grid; grid-template-columns: 4.5rem 1fr 3rem 3.5rem; align-items: center; gap: 0.75rem;
   padding: 0.7rem 0.9rem; border: 1px solid var(--line); border-radius: 4px; background: #14171c;
 }
@@ -119,7 +120,14 @@ button.danger:not(.ghost) { background: #2a1214; }
 .row { display: flex; gap: 0.4rem; margin-bottom: 0.5rem; }
 .row input { flex: 1; min-width: 0; }
 .row .narrow { flex: 0 0 3.2rem; }
-.controls > .ghost { width: 100%; }
+.controls > .ghost, .wide { width: 100%; }
+.transport-row { display: grid; grid-template-columns: auto 1fr auto; gap: 0.4rem; margin-bottom: 0.4rem; }
+.goto { display: flex; gap: 0.3rem; min-width: 0; }
+.goto input { width: 100%; min-width: 0; text-align: center; }
+.keys { font-size: 0.65rem; margin: 0 0 0.8rem; letter-spacing: 0.02em; }
+.run-panel select { flex: 1; min-width: 0; }
+select { font: inherit; color: inherit; background: #181b21; border: 1px solid var(--line); border-radius: 4px; padding: 0.45rem 0.5rem; }
+.ended { font-size: 0.75rem; color: var(--stby); margin: 0.2rem 0 0; }
 .preview-banner { color: var(--stby); font-size: 0.75rem; letter-spacing: 0.12em; margin: 0 0 0.5rem; }
 .log { list-style: none; margin: 0; padding: 0; font-size: 0.75rem; max-height: 180px; overflow-y: auto; display: grid; gap: 0.25rem; }
 .log time { color: var(--muted); margin-right: 0.4rem; }

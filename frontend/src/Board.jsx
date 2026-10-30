@@ -4,15 +4,19 @@ import { useGSAP } from '@gsap/react'
 import { api } from './api'
 import CueEditor from './board/CueEditor'
 import ProductionHeader from './board/ProductionHeader'
-import { cueStates, playheadIndex, sortCues } from './board/state'
+import RunPanel from './board/RunPanel'
+import Transport from './board/Transport'
+import { cueStates, findByNumber, playheadIndex, sortCues, stepLoad } from './board/state'
 
 gsap.registerPlugin(useGSAP)
 
 // GSAP owns each card's look (on .cue-inner); React only renders content.
 // The entrance animates the outer <li>, so the two never tween the same property.
+const STANDBY = { backgroundColor: '#22262d', borderColor: '#8a929e', opacity: 1, scale: 1 }
 const LOOK = {
   pending: { backgroundColor: '#14171c', borderColor: '#262b33', opacity: 0.7, scale: 1 },
-  standby: { backgroundColor: '#22262d', borderColor: '#8a929e', opacity: 1, scale: 1 },
+  standby: STANDBY,
+  loaded: STANDBY,
   active: { backgroundColor: '#3a2d0a', borderColor: '#e8b730', opacity: 1, scale: 1.02 },
   complete: { backgroundColor: '#101216', borderColor: '#1d2026', opacity: 0.4, scale: 1 },
 }
@@ -22,7 +26,7 @@ const FLASH = {
   to: { boxShadow: '0 0 0 0px rgba(232, 183, 48, 0)', duration: 0.6, ease: 'power2.out' },
 }
 
-const STATUS = { complete: 'DONE', active: 'GO', standby: 'STBY', pending: '' }
+const STATUS = { complete: 'DONE', active: 'GO', loaded: 'LOAD', standby: 'STBY', pending: '' }
 
 // Preview runs through the list from the top: cue i active, i+1 standby.
 function previewState(i, activeIdx) {
@@ -35,13 +39,14 @@ function previewState(i, activeIdx) {
 // Playhead sits over the centre of cue i on the track; -1 is "before the top of show".
 const playheadPos = (i, n) => (i < 0 || n === 0 ? '0%' : `${((i + 0.5) / n) * 100}%`)
 
-export default function Board({ productionId, onBack }) {
+export default function Board({ productionId, runId, onBack, onSelectRun }) {
   const [production, setProduction] = useState(null)
-  const [cues, setCues] = useState([])
+  const [cues, setCues] = useState(null)
+  const [runs, setRuns] = useState([])
   const [run, setRun] = useState(null)
-  const [runDraft, setRunDraft] = useState('Run 1')
+  const [loadedCue, setLoadedCue] = useState(null)
+  const [gotoText, setGotoText] = useState('')
   const [mode, setMode] = useState('live')
-  const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
   const [previewing, setPreviewing] = useState(false)
   const [error, setError] = useState('')
@@ -51,33 +56,67 @@ export default function Board({ productionId, onBack }) {
   const markerRef = useRef(null)
   const fillRef = useRef(null)
   const previewTl = useRef(null)
+  const gotoRef = useRef(null)
 
-  // The server decides the active and next cue; the board just looks them up.
-  const events = run?.events ?? []
-  const states = useMemo(() => cueStates(cues, run?.state), [cues, run])
-  const playIdx = useMemo(() => playheadIndex(cues, run?.state), [cues, run])
-  const nextCue = cues.find((c) => c.id === run?.state.next_cue)
+  const cueList = useMemo(() => cues ?? [], [cues])
+  const loaded = Boolean(production && cues && run)
   const live = mode === 'live'
+  const ended = Boolean(run?.ended_at)
 
-  // Open a run by label, creating it if this production doesn't have one yet.
-  const openRun = useCallback(
-    async (label) => {
-      const runs = await api.runs(productionId)
-      const found = runs.find((r) => r.label === label) ?? (await api.createRun(productionId, { label }))
-      setRun(await api.run(found.id))
-    },
-    [productionId],
-  )
+  // The server decides the active and next cue; the board looks them up and
+  // overlays the operator's loaded cue, which only exists on this screen.
+  const states = useMemo(() => cueStates(cueList, run?.state, loadedCue), [cueList, run, loadedCue])
+  const playIdx = useMemo(() => playheadIndex(cueList, run?.state), [cueList, run])
+  const nextCue = cueList.find((c) => c.id === (loadedCue ?? run?.state.next_cue))
+  const gotoTarget = findByNumber(cueList, gotoText)
+  const canBack =
+    run?.state.active_number != null && cueList.some((c) => Number(c.number) < Number(run.state.active_number))
 
   useEffect(() => {
-    Promise.all([api.production(productionId), api.cues(productionId), openRun('Run 1')])
-      .then(([p, c]) => {
+    let cancelled = false
+    Promise.all([api.production(productionId), api.cues(productionId), api.runs(productionId)])
+      .then(async ([p, c, r]) => {
+        if (cancelled) return
         setProduction(p)
         setCues(c)
-        setLoaded(true)
+        setRuns(r)
+        // No run in the URL: open the latest one, or start "Run 1".
+        if (!runId) {
+          const target = r[0] ?? (await api.createRun(productionId, { label: 'Run 1' }))
+          if (!r.length) setRuns([target])
+          onSelectRun(target.id, { replace: true })
+        }
       })
       .catch((e) => setError(e.message))
-  }, [productionId, openRun])
+    return () => {
+      cancelled = true
+    }
+    // Only on a new production: runId changes are handled by the effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productionId])
+
+  useEffect(() => {
+    if (!runId) return
+    let cancelled = false
+    api
+      .run(runId)
+      .then((r) => {
+        if (cancelled) return
+        if (r.production !== productionId) throw new Error('That run belongs to another production.')
+        setRun(r)
+        setLoadedCue(null)
+      })
+      .catch((e) => setError(e.message))
+    return () => {
+      cancelled = true
+    }
+  }, [runId, productionId])
+
+  // Typing in GOTO follows whatever cue is loaded.
+  useEffect(() => {
+    const cue = cueList.find((c) => c.id === loadedCue)
+    if (cue) setGotoText(cue.number)
+  }, [loadedCue, cueList])
 
   const { contextSafe } = useGSAP({ scope })
 
@@ -95,7 +134,7 @@ export default function Board({ productionId, onBack }) {
   useGSAP(
     () => {
       if (!loaded || !live) return
-      cardRefs.current.length = cues.length
+      cardRefs.current.length = cueList.length
       applyStates(states, playIdx, 0)
       gsap.from('.track', { scaleX: 0, transformOrigin: 'left center', duration: 0.6, ease: 'power3.out' })
       gsap.from('.cue-list > li', { y: 28, autoAlpha: 0, duration: 0.5, ease: 'power3.out', stagger: 0.05 })
@@ -103,20 +142,24 @@ export default function Board({ productionId, onBack }) {
     { dependencies: [loaded, live], scope },
   )
 
-  // Settle the cards whenever the run state or the cue list changes.
+  // Settle the cards whenever the run state, the loaded cue or the cue list changes.
   useEffect(() => {
     if (loaded && live && !previewing) applyStates(states, playIdx, 0.4)
   }, [loaded, live, previewing, states, playIdx, applyStates])
 
-  const go = contextSafe(async () => {
-    if (!live || busy || previewing || !nextCue) return
+  // GO, BACK, GOTO and RESET all append one event and return the new state.
+  const act = contextSafe(async (action, cueId) => {
+    if (!live || busy || previewing || !run || ended) return
+    if (action === 'go' && !nextCue) return
     setBusy(true)
     setError('')
     try {
-      const { event, state } = await api.go(run.id)
+      const target = action === 'go' ? (loadedCue ?? undefined) : cueId
+      const { event, state } = await api[action](run.id, target)
       setRun((prev) => ({ ...prev, events: [...prev.events, event], state }))
-      // The settle effect tweens the states; this adds the GO flash on top.
-      const card = cardRefs.current[cues.findIndex((c) => c.id === state.active_cue)]
+      setLoadedCue(null)
+      // The settle effect tweens the states; this adds the flash on top.
+      const card = cardRefs.current[cueList.findIndex((c) => c.id === state.active_cue)]
       if (card) {
         gsap.fromTo(card, FLASH.from, FLASH.to)
         card.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
@@ -128,9 +171,15 @@ export default function Board({ productionId, onBack }) {
     }
   })
 
+  // Clicking a card loads it (clicking again unloads). It never fires.
+  function toggleLoad(cueId) {
+    if (previewing || ended) return
+    setLoadedCue((current) => (current === cueId ? null : cueId))
+  }
+
   // Preview: a visual-only timeline through every cue. Nothing is POSTed.
   const preview = contextSafe(() => {
-    if (previewing || cues.length === 0) return
+    if (previewing || cueList.length === 0) return
     const cards = cardRefs.current
     const n = cards.length
     setPreviewing(true)
@@ -161,12 +210,24 @@ export default function Board({ productionId, onBack }) {
     setPreviewing(false)
   })
 
-  async function loadRun(e) {
-    e.preventDefault()
-    const label = runDraft.trim()
-    if (!label || label === run?.label) return
+  async function createRun(data) {
     try {
-      await openRun(label)
+      const created = await api.createRun(productionId, data)
+      setRuns((prev) => [created, ...prev])
+      onSelectRun(created.id)
+      return true
+    } catch (err) {
+      setError(err.message)
+      return false
+    }
+  }
+
+  async function endRun() {
+    try {
+      const updated = await api.endRun(run.id)
+      setRun((prev) => ({ ...prev, ...updated }))
+      setRuns((prev) => prev.map((r) => (r.id === updated.id ? updated : r)))
+      setLoadedCue(null)
     } catch (err) {
       setError(err.message)
     }
@@ -182,16 +243,40 @@ export default function Board({ productionId, onBack }) {
     }
   }
 
-  // Space bar is GO, like the button on a lighting desk.
+  // Desk-style keys. Ignored while typing, except Esc.
   useEffect(() => {
     const onKey = (e) => {
-      if (e.code !== 'Space' || e.target.closest('input, textarea, button')) return
-      e.preventDefault()
-      go()
+      if (!live) return
+      const typing = e.target.closest('input, textarea, select')
+      if (e.key === 'Escape') {
+        setLoadedCue(null)
+        if (typing) e.target.blur()
+        return
+      }
+      if (typing || e.metaKey || e.ctrlKey || e.altKey) return
+      // Space is always GO, even with a button focused (that would otherwise click it).
+      if (e.code === 'Space') {
+        e.preventDefault()
+        act('go')
+      } else if (e.key === 'b' || e.key === 'ArrowLeft') {
+        act('back')
+      } else if (e.key === 'g') {
+        e.preventDefault()
+        gotoRef.current?.focus()
+        gotoRef.current?.select()
+      } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault()
+        if (!ended) setLoadedCue(stepLoad(cueList, run?.state, loadedCue, e.key === 'ArrowDown' ? 1 : -1))
+      }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [go])
+  }, [live, act, cueList, run, loadedCue, ended])
+
+  const goLabel = ended ? 'ENDED' : nextCue || cueList.length === 0 ? 'GO' : 'END'
+  const nextText = nextCue
+    ? `${loadedCue ? 'Loaded' : 'Next'}: Q${nextCue.number} ${nextCue.label}`
+    : 'End of cue list'
 
   return (
     <main className={`board ${previewing ? 'is-previewing' : ''}`} ref={scope}>
@@ -217,8 +302,8 @@ export default function Board({ productionId, onBack }) {
 
       <div className="track" aria-hidden="true">
         <div className="track-fill" ref={fillRef} />
-        {cues.map((c, i) => (
-          <span key={c.id} className="tick" style={{ left: playheadPos(i, cues.length) }}>
+        {cueList.map((c, i) => (
+          <span key={c.id} className="tick" style={{ left: playheadPos(i, cueList.length) }}>
             {c.number}
           </span>
         ))}
@@ -228,14 +313,21 @@ export default function Board({ productionId, onBack }) {
       <div className="board-body">
         {live ? (
           <ol className="cue-list">
-            {cues.map((c, i) => [
+            {cueList.map((c, i) => [
               c.scene && (
                 <li key={`scene-${c.id}`} className="scene-divider">
                   {c.scene}
                 </li>
               ),
               <li key={c.id} className="cue-card">
-                <div className="cue-inner" ref={(el) => (cardRefs.current[i] = el)}>
+                <button
+                  type="button"
+                  className="cue-inner"
+                  ref={(el) => (cardRefs.current[i] = el)}
+                  aria-pressed={c.id === loadedCue}
+                  aria-label={`Load Q${c.number} ${c.label}`}
+                  onClick={() => toggleLoad(c.id)}
+                >
                   <span className="cue-number">Q{c.number}</span>
                   <span className="cue-label">
                     {c.label}
@@ -243,18 +335,18 @@ export default function Board({ productionId, onBack }) {
                   </span>
                   <span className="cue-page">{c.page ? `p.${c.page}` : ''}</span>
                   <span className="cue-status">{STATUS[states[i]]}</span>
-                </div>
+                </button>
               </li>,
             ])}
-            {loaded && cues.length === 0 && <li className="muted">No cues yet. Switch to Edit to add some.</li>}
+            {cues && cues.length === 0 && <li className="muted">No cues yet. Switch to Edit to add some.</li>}
           </ol>
         ) : (
           <CueEditor
-            cues={cues}
+            cues={cueList}
             productionId={productionId}
-            onSaved={(saved) => afterCueChange(cues.map((c) => (c.id === saved.id ? saved : c)))}
-            onCreated={(created) => afterCueChange([...cues, created])}
-            onDeleted={(id) => afterCueChange(cues.filter((c) => c.id !== id))}
+            onSaved={(saved) => afterCueChange(cueList.map((c) => (c.id === saved.id ? saved : c)))}
+            onCreated={(created) => afterCueChange([...cueList, created])}
+            onDeleted={(id) => afterCueChange(cueList.filter((c) => c.id !== id))}
           />
         )}
 
@@ -262,24 +354,24 @@ export default function Board({ productionId, onBack }) {
           {live ? (
             <>
               {previewing && <p className="preview-banner">PREVIEW · not recorded</p>}
-              <button className="go" onClick={go} disabled={busy || previewing || !nextCue}>
-                {nextCue || cues.length === 0 ? 'GO' : 'END'}
-              </button>
-              <p className="muted next">{nextCue ? `Next: Q${nextCue.number} ${nextCue.label}` : 'End of cue list'}</p>
-
-              <form className="row" onSubmit={loadRun}>
-                <input value={runDraft} onChange={(e) => setRunDraft(e.target.value)} aria-label="Run label" />
-                <button type="submit" className="ghost">
-                  Load run
-                </button>
-              </form>
-
+              <Transport
+                disabled={busy || previewing || !run || ended}
+                goLabel={goLabel}
+                canGo={Boolean(nextCue)}
+                canBack={canBack}
+                nextText={nextText}
+                gotoText={gotoText}
+                onGotoText={setGotoText}
+                gotoTarget={gotoTarget}
+                gotoRef={gotoRef}
+                onAction={act}
+              />
               {previewing ? (
-                <button className="ghost" onClick={stopPreview}>
+                <button className="ghost wide" onClick={stopPreview}>
                   Stop preview
                 </button>
               ) : (
-                <button className="ghost" onClick={preview} disabled={cues.length === 0}>
+                <button className="ghost wide" onClick={preview} disabled={cueList.length === 0}>
                   Preview run
                 </button>
               )}
@@ -291,17 +383,7 @@ export default function Board({ productionId, onBack }) {
             </p>
           )}
 
-          <h3>Run log · {run?.label}</h3>
-          <ol className="log">
-            {events.length === 0 && <li className="muted">No cues fired in this run.</li>}
-            {events.map((e) => (
-              <li key={e.id}>
-                <time>{new Date(e.fired_at).toLocaleTimeString()}</time>
-                {e.action !== 'go' && <b className="log-action">{e.action.toUpperCase()} </b>}
-                {e.action !== 'reset' && `Q${e.cue_number} ${e.cue_label}`}
-              </li>
-            ))}
-          </ol>
+          <RunPanel runs={runs} run={run} onSelect={onSelectRun} onCreate={createRun} onEnd={endRun} />
           {error && <p className="error">{error}</p>}
         </aside>
       </div>
