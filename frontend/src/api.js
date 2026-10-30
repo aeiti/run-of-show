@@ -90,6 +90,11 @@ export const api = {
   production: (id) => request(`/productions/${id}/`),
   updateProduction: (id, data) => request(`/productions/${id}/`, { method: 'PATCH', body: data }),
   deleteProduction: (id) => request(`/productions/${id}/`, { method: 'DELETE' }),
+  // A copy with the cue list but no runs; data overrides the copy's details.
+  duplicateProduction: (id, data = {}) => request(`/productions/${id}/duplicate/`, { method: 'POST', body: data }),
+  exportProduction: (id) => download(`/productions/${id}/export/`),
+  // form is FormData with the exported JSON as file; always creates a new production.
+  importProduction: (form) => request('/productions/import/', { method: 'POST', body: form }),
   cues: (id) => request(`/productions/${id}/cues/`),
   createCue: (id, data) => request(`/productions/${id}/cues/`, { method: 'POST', body: data }),
   updateCue: (cueId, data) => request(`/cues/${cueId}/`, { method: 'PATCH', body: data }),

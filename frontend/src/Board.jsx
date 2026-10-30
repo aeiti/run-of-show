@@ -13,6 +13,7 @@ import Transport from './board/Transport'
 import { extraTotal, fadeFor, formatSeconds, formatTime } from './board/cueTime'
 import { FLASH, LOOK, STATUS, playheadPos } from './board/looks'
 import { cueStates, findByNumber, playheadIndex, sortCues, stepLoad } from './board/state'
+import { sceneSpans, trackLabels } from './board/track'
 
 gsap.registerPlugin(useGSAP)
 // The fade bars are timers: after a stalled frame they should jump to where
@@ -42,6 +43,7 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
   const cardRefs = useRef([])
   const markerRef = useRef(null)
   const fillRef = useRef(null)
+  const trackRef = useRef(null)
   const gotoRef = useRef(null)
 
   const cueList = useMemo(() => cues ?? [], [cues])
@@ -60,6 +62,19 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
   const gotoTarget = findByNumber(cueList, gotoText)
   const canBack =
     run?.state.active_number != null && cueList.some((c) => Number(c.number) < Number(run.state.active_number))
+
+  // Which cue numbers fit on the track depends on how wide it is.
+  const [trackWidth, setTrackWidth] = useState(0)
+  useEffect(() => {
+    const el = trackRef.current
+    if (!el) return
+    const ro = new ResizeObserver(([entry]) => setTrackWidth(entry.contentRect.width))
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [loaded])
+  const labels = useMemo(() => trackLabels(cueList, trackWidth), [cueList, trackWidth])
+  const scenes = useMemo(() => sceneSpans(cueList, trackWidth), [cueList, trackWidth])
+  const pct = (count) => `${(count / cueList.length) * 100}%`
 
   useEffect(() => {
     let cancelled = false
@@ -275,11 +290,24 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
         </div>
       </div>
 
-      <div className="track" aria-hidden="true">
+      <div className="track" aria-hidden="true" ref={trackRef}>
+        {scenes.map((s, k) => (
+          <div
+            key={s.start}
+            className={`track-scene${k % 2 ? ' alt' : ''}`}
+            style={{ left: pct(s.start), width: pct(s.end - s.start) }}
+            title={s.name}
+          >
+            {s.labelled && <span>{s.name}</span>}
+          </div>
+        ))}
         <div className="track-fill" ref={fillRef} />
-        {cueList.map((c, i) => (
-          <span key={c.id} className="tick" style={{ left: playheadPos(i, cueList.length) }}>
-            {c.number}
+        {labels.map((l) => (
+          <span key={cueList[l.index].id}>
+            <span className="tick" style={{ left: l.x }} />
+            <span className="tick-label" style={{ left: l.left }}>
+              {cueList[l.index].number}
+            </span>
           </span>
         ))}
         <div className="playhead" ref={markerRef} />
