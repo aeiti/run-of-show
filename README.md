@@ -58,6 +58,8 @@ cd frontend
 npm test
 ```
 
+CI (`.github/workflows/ci.yml`) runs on every pull request and push to `main`. The backend job checks that migrations match the models, then runs pytest against a Postgres 17 service. The frontend job runs lint, the tests and the build.
+
 ## Backend
 
 Four models in `backend/shows/models.py`, all registered in the Django admin:
