@@ -1,17 +1,36 @@
 import { useState } from 'react'
 import { api } from '../api'
+import { formatTime, parseTimeInput } from './cueTime'
+
+const toInput = (value) => (value == null ? '' : String(value))
+
+// Each column reads its text from a cue and turns typed text into API fields.
+// Most map one-to-one; Time is up and down in one box, as on Eos ("5/3").
+const plain = (key) => ({ get: (cue) => toInput(cue[key]), put: (text) => ({ [key]: text }) })
 
 const COLUMNS = [
-  { key: 'number', label: '#', className: 'narrow', required: true },
-  { key: 'label', label: 'Label' },
-  { key: 'page', label: 'Pg', className: 'narrow', inputMode: 'numeric' },
-  { key: 'scene', label: 'Scene' },
-  { key: 'notes', label: 'Notes', className: 'wide' },
+  { key: 'number', label: '#', className: 'narrow', required: true, ...plain('number') },
+  { key: 'label', label: 'Label', ...plain('label') },
+  {
+    key: 'time',
+    label: 'Time',
+    className: 'narrow',
+    placeholder: '5/3',
+    get: formatTime,
+    put: parseTimeInput,
+  },
+  { key: 'follow', label: 'F/H', className: 'narrow', placeholder: 'F2', ...plain('follow') },
+  {
+    key: 'page',
+    label: 'Pg',
+    className: 'narrow',
+    inputMode: 'numeric',
+    get: (cue) => toInput(cue.page),
+    put: (text) => ({ page: text === '' ? null : Number(text) }), // the API wants a number or null
+  },
+  { key: 'scene', label: 'Scene', ...plain('scene') },
+  { key: 'notes', label: 'Notes', className: 'wide', ...plain('notes') },
 ]
-
-// The API wants a number or null for page; the inputs hold strings.
-const toApi = (key, value) => (key === 'page' ? (value === '' ? null : Number(value)) : value)
-const toInput = (value) => (value == null ? '' : String(value))
 
 /** Inline cue editing: each field saves on Enter or when it loses focus; Esc puts it back. */
 export default function CueEditor({ cues, productionId, onSaved, onCreated, onDeleted }) {
@@ -39,15 +58,14 @@ function CueRow({ cue, onSaved, onDeleted }) {
   const [error, setError] = useState('')
   const [confirming, setConfirming] = useState(false)
 
-  async function commit(key, input) {
-    const value = toApi(key, input.value)
-    if (toInput(value) === toInput(cue[key])) return
+  async function commit(column, input) {
+    if (input.value.trim() === column.get(cue).trim()) return
     try {
       setError('')
-      onSaved(await api.updateCue(cue.id, { [key]: value }))
+      onSaved(await api.updateCue(cue.id, column.put(input.value)))
     } catch (err) {
       setError(err.message)
-      input.value = toInput(cue[key])
+      input.value = column.get(cue)
     }
   }
 
@@ -70,17 +88,17 @@ function CueRow({ cue, onSaved, onDeleted }) {
       {COLUMNS.map((c) => (
         <input
           // Re-mount when the saved value changes so the uncontrolled input shows it.
-          key={`${c.key}:${toInput(cue[c.key])}`}
+          key={`${c.key}:${c.get(cue)}`}
           aria-label={`Cue ${cue.number} ${c.label}`}
           className={c.className}
           inputMode={c.inputMode}
           required={c.required}
-          defaultValue={toInput(cue[c.key])}
-          onBlur={(e) => commit(c.key, e.target)}
+          defaultValue={c.get(cue)}
+          onBlur={(e) => commit(c, e.target)}
           onKeyDown={(e) => {
             if (e.key === 'Enter') e.target.blur()
             if (e.key === 'Escape') {
-              e.target.value = toInput(cue[c.key])
+              e.target.value = c.get(cue)
               e.target.blur()
             }
           }}
@@ -94,7 +112,7 @@ function CueRow({ cue, onSaved, onDeleted }) {
   )
 }
 
-const BLANK = { number: '', label: '', page: '', scene: '', notes: '' }
+const BLANK = Object.fromEntries(COLUMNS.map((c) => [c.key, '']))
 
 function NewCueRow({ productionId, onCreated }) {
   const [draft, setDraft] = useState(BLANK)
@@ -104,7 +122,7 @@ function NewCueRow({ productionId, onCreated }) {
     e.preventDefault()
     try {
       setError('')
-      const body = Object.fromEntries(Object.entries(draft).map(([k, v]) => [k, toApi(k, v)]))
+      const body = Object.assign({}, ...COLUMNS.map((c) => c.put(draft[c.key])))
       onCreated(await api.createCue(productionId, body))
       setDraft(BLANK)
       e.target.querySelector('input').focus()
@@ -119,7 +137,7 @@ function NewCueRow({ productionId, onCreated }) {
         <input
           key={c.key}
           aria-label={`New cue ${c.label}`}
-          placeholder={c.key === 'number' ? 'New' : c.label}
+          placeholder={c.key === 'number' ? 'New' : (c.placeholder ?? c.label)}
           className={c.className}
           inputMode={c.inputMode}
           required={c.required}

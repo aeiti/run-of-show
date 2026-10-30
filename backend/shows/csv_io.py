@@ -3,14 +3,16 @@
 Two input formats:
 
 * **Simple CSV** with a header row; ``number`` is required, ``label``,
-  ``page``, ``scene`` and ``notes`` are optional. This is also what export
+  ``page``, ``scene``, ``notes``, ``time``, ``down_time``, ``duration`` and
+  ``follow`` are optional. This is also what export
   writes, so an export can be edited in a spreadsheet and imported back.
 * **ETC Eos CSV export**, either cues only or a whole show file. Eos writes
   several sections (``START_LEVELS`` … ``END_LEVELS``, ``START_TARGETS`` …);
   cues live in the TARGETS section as rows whose ``TARGET_TYPE_AS_TEXT`` is
   ``Cue``. Cue numbers repeat across cue lists, so one list is imported at a
   time. Part rows (``PART_NUMBER`` set) are skipped: they belong to a cue
-  that has its own row. Checked against real Eos exports from two shows
+  that has its own row (its time is blank, and Eos's ``DURATION`` covers
+  the parts). Checked against real Eos exports from two shows
   (one with 10 lists, point cues, parts, labels, scenes and notes).
 """
 
@@ -18,11 +20,13 @@ import csv
 import io
 from decimal import Decimal, InvalidOperation
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
 
-from .models import Cue, format_number
+from .models import FOLLOW_VALIDATOR, Cue, format_number
 
-FIELDS = ["number", "label", "page", "scene", "notes"]
+FIELDS = ["number", "label", "page", "scene", "notes", "time", "down_time", "duration", "follow"]
+SECONDS = ["time", "down_time", "duration"]
 
 
 class CsvImportError(Exception):
@@ -69,6 +73,10 @@ def eos_targets(text):
                     "page": "",
                     "scene": record.get("SCENE_TEXT", ""),
                     "notes": record.get("CUE_NOTES", ""),
+                    "time": record.get("TIME_DATA", ""),
+                    "down_time": record.get("DOWN_TIME", ""),
+                    "duration": record.get("DURATION", ""),
+                    "follow": record.get("FOLLOW", ""),
                 }
             )
     counts = {}
@@ -101,6 +109,29 @@ def simple_rows(text):
     ]
 
 
+def parse_seconds(text):
+    """"3.9" -> 3.9, "1:00" -> 60, "1:02:03" -> 3723, "" -> None. Raises ValueError."""
+    text = text.strip()
+    if not text:
+        return None
+    parts = text.split(":")
+    if len(parts) > 3:
+        raise ValueError
+    try:
+        values = [Decimal(p) for p in parts]
+    except InvalidOperation:
+        raise ValueError
+    if any(not v.is_finite() or v < 0 for v in values) or any(v >= 60 for v in values[1:]):
+        raise ValueError
+    seconds = Decimal(0)
+    for v in values:
+        seconds = seconds * 60 + v
+    seconds = seconds.quantize(Decimal("0.01"))
+    if seconds >= Decimal("1000000"):
+        raise ValueError
+    return seconds
+
+
 def clean(raw):
     """(values, None) for a usable row, or (None, reason)."""
     text = raw["number"].strip()
@@ -115,12 +146,27 @@ def clean(raw):
     page = raw.get("page", "").strip()
     if page and not page.isdigit():
         return None, f"Page {page!r} is not a whole number."
+    times = {}
+    for field in SECONDS:
+        text = raw.get(field, "")
+        try:
+            times[field] = parse_seconds(text)
+        except ValueError:
+            return None, f"{field.replace('_', ' ').capitalize()} {text.strip()!r} is not a time in seconds or m:ss."
+    follow = raw.get("follow", "").strip().upper()
+    if follow:
+        try:
+            FOLLOW_VALIDATOR(follow)
+        except ValidationError:
+            return None, f"Follow {follow!r} should look like F2 or H0.5."
     return {
         "number": number,
         "label": raw.get("label", "").strip()[:200],
         "page": int(page) if page else None,
         "scene": raw.get("scene", "").strip()[:200],
         "notes": raw.get("notes", "").strip(),
+        **times,
+        "follow": follow,
     }, None
 
 
@@ -164,6 +210,10 @@ def plan(production, text, mode="merge", eos_list=None):
             # shouldn't wipe labels typed here. Replace takes the file as written.
             fields = [f for f in FIELDS[1:] if mode == "replace" or values[f] not in ("", None)]
             changes = {f: values[f] for f in fields if getattr(current, f) != values[f]}
+            # As in the API: new times without a duration make the old Eos duration stale.
+            if any(f in changes for f in ("time", "down_time")) and "duration" not in changes:
+                if current.duration is not None and values["duration"] is None:
+                    changes["duration"] = None
             action = "update" if changes else "unchanged"
         planned.append(
             {
@@ -171,6 +221,7 @@ def plan(production, text, mode="merge", eos_list=None):
                 "action": action,
                 **values,
                 "number": format_number(values["number"]),
+                **{f: format_number(values[f]) for f in SECONDS},
                 "changes": sorted(changes) if action == "update" else [],
                 "_apply": changes,
             }
@@ -213,7 +264,8 @@ def export_cues(production):
     writer = csv.writer(out)
     writer.writerow(FIELDS)
     for cue in production.cues.all():
-        writer.writerow([format_number(cue.number), cue.label, cue.page or "", cue.scene, cue.notes])
+        times = [format_number(getattr(cue, f)) or "" for f in SECONDS]
+        writer.writerow([format_number(cue.number), cue.label, cue.page or "", cue.scene, cue.notes, *times, cue.follow])
     return out.getvalue()
 
 

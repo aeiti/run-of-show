@@ -142,6 +142,25 @@ def test_cue_crud_and_duplicate_numbers(show):
 
 
 @pytest.mark.django_db
+def test_cue_times_and_follow(show):
+    client = client_for(show.owner)
+    cue = show.cues["12"]
+    Cue.objects.filter(pk=cue.pk).update(time=Decimal("5"), duration=Decimal("13"))
+    url = f"/api/cues/{cue.id}/"
+
+    # Editing something else keeps Eos's duration; editing a time drops it.
+    assert client.patch(url, {"label": "Lightning"}, format="json").data["duration"] == "13"
+    assert client.patch(url, {"time": "5.00"}, format="json").data["duration"] == "13"  # same time
+    timed = client.patch(url, {"time": "3.5", "down_time": "1"}, format="json").data
+    assert (timed["time"], timed["down_time"], timed["duration"]) == ("3.5", "1", None)
+
+    assert client.patch(url, {"follow": " f2 "}, format="json").data["follow"] == "F2"
+    assert client.patch(url, {"follow": ""}, format="json").data["follow"] == ""
+    assert client.patch(url, {"follow": "X2"}, format="json").status_code == 400
+    assert client.patch(url, {"time": "-1"}, format="json").status_code == 400
+
+
+@pytest.mark.django_db
 def test_operator_actions_move_the_active_cue(show):
     client = client_for(show.owner)
     run, cues = show.run, show.cues

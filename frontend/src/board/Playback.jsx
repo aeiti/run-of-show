@@ -44,29 +44,46 @@ export default function Playback({ scope, cues, events, cardRefs, markerRef, fil
       onComplete: () => setPlaying(false),
     })
 
+    const bars = cards.map((card) => card.querySelector('.cue-fade'))
     let looks = cueStates(cues, { active_cue: null, active_number: null, next_cue: cues[0]?.id ?? null })
     // Always pass GSAP a copy: it writes into the vars object (e.g. duration),
     // and LOOK is shared and frozen.
     cards.forEach((card, i) => timeline.set(card, { ...LOOK[looks[i]] }, 0))
+    timeline.set(bars, { scaleX: 0 }, 0)
     timeline.set(markerRef.current, { left: '0%' }, 0)
     timeline.set(fillRef.current, { width: '0%' }, 0)
 
     // Lead-in so the first cue isn't already firing at 0:00.
     const lead = 0.6
-    for (const step of steps) {
+    steps.forEach((step, k) => {
       const at = step.t + lead
       const next = cueStates(cues, step.state)
       cards.forEach((card, i) => {
         if (next[i] !== looks[i]) timeline.to(card, { ...LOOK[next[i]], duration: 0.35, ease: 'power2.out' }, at)
+        if (looks[i] === 'active') timeline.set(bars[i], { scaleX: 0 }, at)
       })
-      const card = cards[cues.findIndex((c) => c.id === step.state.active_cue)]
+      const index = cues.findIndex((c) => c.id === step.state.active_cue)
+      const card = cards[index]
       // immediateRender: false, or every card would show its flash start state at t=0.
       if (card) timeline.fromTo(card, { ...FLASH.from }, { ...FLASH.to, immediateRender: false }, at)
+      if (card) {
+        // A fade cut off by the next action stops where it got to, so it can't
+        // keep running over the reset that follows it.
+        const gap = k + 1 < steps.length ? steps[k + 1].t - step.t : Infinity
+        const fade = step.fade
+        const cut = fade > gap
+        timeline.fromTo(
+          bars[index],
+          { scaleX: 0 },
+          { scaleX: cut ? gap / fade : 1, duration: cut ? gap : fade, ease: 'none', immediateRender: false },
+          at,
+        )
+      }
       const pos = playheadPos(playheadIndex(cues, step.state), n)
       timeline.to(markerRef.current, { left: pos, duration: 0.4, ease: 'power3.inOut' }, at)
       timeline.to(fillRef.current, { width: pos, duration: 0.4, ease: 'power3.inOut' }, at)
       looks = next
-    }
+    })
     timeline.to({}, { duration: 1 })
     timeline.timeScale(speed)
     return timeline

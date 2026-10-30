@@ -8,13 +8,19 @@ import ProductionHeader from './board/ProductionHeader'
 import Playback from './board/Playback'
 import RunPanel from './board/RunPanel'
 import Transport from './board/Transport'
+import { extraTotal, fadeFor, formatSeconds, formatTime } from './board/cueTime'
 import { FLASH, LOOK, STATUS, playheadPos } from './board/looks'
 import { cueStates, findByNumber, playheadIndex, sortCues, stepLoad } from './board/state'
 
 gsap.registerPlugin(useGSAP)
+// The fade bars are timers: after a stalled frame they should jump to where
+// real time says they are, not resume slowly as GSAP does by default.
+gsap.ticker.lagSmoothing(0)
 
 // GSAP owns each card's look (on .cue-inner); React only renders content.
 // The entrance animates the outer <li>, so the two never tween the same property.
+// Each card's .cue-fade bar fills over the cue's time after it goes, so the
+// operator can see when a cue has finished; a later action cuts it off.
 
 export default function Board({ productionId, runId, onBack, onSelectRun }) {
   const [production, setProduction] = useState(null)
@@ -101,7 +107,15 @@ export default function Board({ productionId, runId, onBack, onSelectRun }) {
   const applyStates = useCallback((looks, idx, duration) => {
     const n = looks.length
     cardRefs.current.forEach((card, i) => {
-      if (card && looks[i]) gsap.to(card, { ...LOOK[looks[i]], duration, ease: 'power2.out' })
+      if (!card || !looks[i]) return
+      gsap.to(card, { ...LOOK[looks[i]], duration, ease: 'power2.out' })
+      const bar = card.querySelector('.cue-fade')
+      if (looks[i] !== 'active') {
+        gsap.killTweensOf(bar)
+        gsap.set(bar, { scaleX: 0 })
+      } else if (!gsap.isTweening(bar)) {
+        gsap.set(bar, { scaleX: 1 }) // already active when the board opened: its fade is long over
+      }
     })
     gsap.to(markerRef.current, { left: playheadPos(idx, n), duration, ease: 'power3.inOut' })
     gsap.to(fillRef.current, { width: playheadPos(idx, n), duration, ease: 'power3.inOut' })
@@ -138,10 +152,13 @@ export default function Board({ productionId, runId, onBack, onSelectRun }) {
       const { event, state } = await api[action](run.id, target)
       setRun((prev) => ({ ...prev, events: [...prev.events, event], state }))
       setLoadedCue(null)
-      // The settle effect tweens the states; this adds the flash on top.
-      const card = cardRefs.current[cueList.findIndex((c) => c.id === state.active_cue)]
+      // The settle effect tweens the states; this adds the flash and the fade bar on top.
+      const index = cueList.findIndex((c) => c.id === state.active_cue)
+      const card = cardRefs.current[index]
       if (card) {
         gsap.fromTo(card, { ...FLASH.from }, { ...FLASH.to })
+        const fade = fadeFor(action, cueList[index])
+        gsap.fromTo(card.querySelector('.cue-fade'), { scaleX: 0 }, { scaleX: 1, duration: fade, ease: 'none' })
         card.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
       }
     } catch (e) {
@@ -280,8 +297,10 @@ export default function Board({ productionId, runId, onBack, onSelectRun }) {
                     {c.label}
                     {c.notes && <small className="cue-notes">{c.notes}</small>}
                   </span>
+                  <CueTime cue={c} />
                   <span className="cue-page">{c.page ? `p.${c.page}` : ''}</span>
                   <span className="cue-status">{STATUS[states[i]]}</span>
+                  <span className="cue-fade" aria-hidden="true" />
                 </button>
               </li>,
             ])}
@@ -370,5 +389,18 @@ export default function Board({ productionId, runId, onBack, onSelectRun }) {
         />
       )}
     </main>
+  )
+}
+
+/** Time as Eos shows it ("5", "5/3"), with the follow or hang and Eos's total when it says more. */
+function CueTime({ cue }) {
+  const time = formatTime(cue)
+  const total = extraTotal(cue)
+  const extra = [cue.follow, total != null && `${formatSeconds(total)} total`].filter(Boolean)
+  return (
+    <span className="cue-time" title={total != null ? 'Total from Eos, counting delays, discrete times and parts' : undefined}>
+      {time || (extra.length ? '' : '–')}
+      {extra.length > 0 && <small>{extra.join(' · ')}</small>}
+    </span>
   )
 }
