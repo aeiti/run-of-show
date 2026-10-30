@@ -182,3 +182,101 @@ class CueTargetSerializer(serializers.Serializer):
 
 class OptionalCueTargetSerializer(serializers.Serializer):
     cue = serializers.IntegerField(required=False, allow_null=True)
+
+
+# Whole-production backup (see backup.py). The same serializers write the
+# file and read it back, so an export always imports.
+
+BACKUP_FORMAT = "run-of-show/production"
+BACKUP_VERSION = 1
+
+
+class BackupProductionSerializer(serializers.ModelSerializer):
+    # Not a ProductionSerializer subclass: its owner and role belong to whoever
+    # is asking, not to the production file.
+    class Meta:
+        model = Production
+        fields = ["name", "company", "venue", "performance_date", "notes"]
+
+
+class BackupCueSerializer(CueSerializer):
+    class Meta(CueSerializer.Meta):
+        fields = [f for f in CueSerializer.Meta.fields if f != "id"]
+
+    def validate_number(self, value):
+        # Clashes are checked across the whole file in BackupSerializer.
+        return value
+
+
+class BackupEventSerializer(serializers.ModelSerializer):
+    # ``cue`` is the cue this event is still linked to, by its current
+    # number; ``cue_number`` is the snapshot taken when the action happened.
+    # They differ once a cue is renumbered, and ``cue`` is null once it is
+    # deleted.
+    cue = CueNumberField(source="cue.number", allow_null=True, required=False)
+    cue_number = CueNumberField(allow_null=True, required=False)
+    fired_at = serializers.DateTimeField()
+
+    class Meta:
+        model = CueEvent
+        fields = ["action", "cue", "cue_number", "cue_label", "fired_at", "note"]
+
+
+class BackupRunSerializer(serializers.ModelSerializer):
+    created_at = serializers.DateTimeField()
+    events = BackupEventSerializer(many=True, required=False)
+
+    class Meta:
+        model = Run
+        fields = ["label", "kind", "created_at", "ended_at", "notes", "events"]
+
+
+class BackupSerializer(serializers.Serializer):
+    format = serializers.CharField()
+    version = serializers.IntegerField()
+    exported_at = serializers.DateTimeField(required=False)
+    production = BackupProductionSerializer()
+    cues = BackupCueSerializer(many=True, required=False)
+    runs = BackupRunSerializer(many=True, required=False)
+
+    def to_internal_value(self, data):
+        # Checked before the fields, as one plain message: the rest of a file
+        # that isn't ours, or is from a newer app, would only add noise.
+        if not isinstance(data, dict) or data.get("format") != BACKUP_FORMAT:
+            raise serializers.ValidationError({"detail": "This is not a Run of Show production file."})
+        version = data.get("version")
+        if not isinstance(version, int) or not 1 <= version <= BACKUP_VERSION:
+            raise serializers.ValidationError({"detail": f"Version {version} files need a newer version of Run of Show."})
+        return super().to_internal_value(data)
+
+    def validate_cues(self, cues):
+        repeated = repeats(c["number"] for c in cues)
+        if repeated:
+            raise serializers.ValidationError(f"Cue {format_number(repeated)} appears more than once.")
+        return cues
+
+    def validate_runs(self, runs):
+        repeated = repeats(r["label"] for r in runs)
+        if repeated:
+            raise serializers.ValidationError(f"A run called {repeated!r} appears more than once.")
+        return runs
+
+    def validate(self, data):
+        numbers = {c["number"] for c in data.get("cues", [])}
+        for run in data.get("runs", []):
+            for event in run.get("events", []):
+                linked = (event.get("cue") or {}).get("number")
+                if linked is not None and linked not in numbers:
+                    raise serializers.ValidationError(
+                        {"runs": f"{run['label']} links an event to cue {format_number(linked)}, which isn't in the file."}
+                    )
+        return data
+
+
+def repeats(values):
+    seen = set()
+    for value in values:
+        if value in seen:
+            return value
+        seen.add(value)
+    return None

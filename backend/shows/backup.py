@@ -1,0 +1,77 @@
+"""Whole-production backup: one JSON file with the details, cues, runs and
+run logs, and the import that turns such a file back into a new production.
+
+Duplicating a production is an export without runs, imported straight back.
+
+Timestamps are kept as they were: a run's ``created_at`` and an event's
+``fired_at`` are ``auto_now_add`` fields, so they are written after the
+insert. That is the one time event rows are touched after they are created,
+and only to restore the original history.
+"""
+
+from django.db import transaction
+from django.utils import timezone
+
+from .models import Cue, CueEvent, Production, Run
+from .serializers import (
+    BACKUP_FORMAT,
+    BACKUP_VERSION,
+    BackupCueSerializer,
+    BackupProductionSerializer,
+    BackupRunSerializer,
+    BackupSerializer,
+)
+
+def export_production(production, runs=True):
+    data = {
+        "format": BACKUP_FORMAT,
+        "version": BACKUP_VERSION,
+        "exported_at": timezone.now().isoformat(),
+        "production": BackupProductionSerializer(production).data,
+        "cues": BackupCueSerializer(production.cues.all(), many=True).data,
+    }
+    if runs:
+        history = production.runs.order_by("created_at", "id").prefetch_related("events__cue")
+        data["runs"] = BackupRunSerializer(history, many=True).data
+    return data
+
+
+def validate(data):
+    """Validated data for ``import_production``; raises DRF's ValidationError."""
+    serializer = BackupSerializer(data=data)
+    serializer.is_valid(raise_exception=True)
+    return serializer.validated_data
+
+
+@transaction.atomic
+def import_production(owner, data, **details):
+    """Create a new production from validated backup data. ``details`` override its fields."""
+    production = Production.objects.create(owner=owner, **{**data["production"], **details})
+    Cue.objects.bulk_create(Cue(production=production, **cue) for cue in data.get("cues", []))
+    cue_ids = dict(production.cues.values_list("number", "id"))
+
+    for run_data in data.get("runs", []):
+        run_data = dict(run_data)
+        created_at = run_data.pop("created_at")
+        events = run_data.pop("events", [])
+        run = Run.objects.create(production=production, **run_data)
+        Run.objects.filter(pk=run.pk).update(created_at=created_at)
+
+        rows = []
+        for event in events:
+            event = dict(event)
+            linked = (event.pop("cue", None) or {}).get("number")
+            rows.append(CueEvent(run=run, cue_id=cue_ids.get(linked), **event))
+        fired = [row.fired_at for row in rows]
+        CueEvent.objects.bulk_create(rows)
+        for row, fired_at in zip(rows, fired):
+            row.fired_at = fired_at
+        CueEvent.objects.bulk_update(rows, ["fired_at"])
+
+    return production
+
+
+def duplicate(production, owner, **details):
+    data = validate(export_production(production, runs=False))
+    details.setdefault("name", f"{production.name} (copy)"[:200])
+    return import_production(owner, data, **details)

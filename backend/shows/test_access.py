@@ -130,3 +130,16 @@ def test_memberships_of_other_productions_are_invisible(show, make_user):
     owner = client_for(show.owner)
     assert owner.patch(f"/api/memberships/{theirs.id}/", {"role": "stage_manager"}, format="json").status_code == 404
     assert owner.delete(f"/api/memberships/{theirs.id}/").status_code == 404
+
+
+@pytest.mark.django_db
+def test_a_viewer_can_export_and_duplicate_into_their_own_production(show, make_user):
+    viewer = member(show, make_user, "viewer")
+    prod = show.production
+    assert viewer.get(f"/api/productions/{prod.id}/export/").status_code == 200
+
+    copy = viewer.post(f"/api/productions/{prod.id}/duplicate/", {}, format="json")
+    assert copy.status_code == 201
+    assert (copy.data["role"], copy.data["owner"]["username"]) == ("owner", "viewer")
+    # The copy is theirs alone: no memberships come with it.
+    assert not Membership.objects.filter(production_id=copy.data["id"]).exists()
