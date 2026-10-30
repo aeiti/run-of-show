@@ -33,8 +33,7 @@ const playheadPos = (i, n) => (i < 0 || n === 0 ? '0%' : `${((i + 0.5) / n) * 10
 export default function Board({ productionId, onBack }) {
   const [production, setProduction] = useState(null)
   const [cues, setCues] = useState([])
-  const [events, setEvents] = useState([])
-  const [runLabel, setRunLabel] = useState('Run 1')
+  const [run, setRun] = useState(null)
   const [runDraft, setRunDraft] = useState('Run 1')
   const [loaded, setLoaded] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -48,24 +47,34 @@ export default function Board({ productionId, onBack }) {
   const fillRef = useRef(null)
   const previewTl = useRef(null)
 
-  // The active cue is the furthest-along cue fired in this run.
-  const activeIdx = useMemo(() => {
-    const fired = new Set(events.map((e) => e.cue))
-    return cues.reduce((acc, c, i) => (fired.has(c.id) ? i : acc), -1)
-  }, [cues, events])
-  const nextIdx = activeIdx + 1
-  const done = cues.length > 0 && nextIdx >= cues.length
+  // The server decides the active and next cue; the board just finds them.
+  const events = run?.events ?? []
+  const activeIdx = useMemo(
+    () => cues.findIndex((c) => c.id === run?.state.active_cue),
+    [cues, run],
+  )
+  const nextIdx = useMemo(() => cues.findIndex((c) => c.id === run?.state.next_cue), [cues, run])
+  const done = cues.length > 0 && nextIdx === -1
+
+  // Open a run by label, creating it if this production doesn't have one yet.
+  const openRun = useCallback(
+    async (label) => {
+      const runs = await api.runs(productionId)
+      const found = runs.find((r) => r.label === label) ?? (await api.createRun(productionId, { label }))
+      setRun(await api.run(found.id))
+    },
+    [productionId],
+  )
 
   useEffect(() => {
-    Promise.all([api.production(productionId), api.cues(productionId), api.events(productionId, 'Run 1')])
-      .then(([p, c, e]) => {
+    Promise.all([api.production(productionId), api.cues(productionId), openRun('Run 1')])
+      .then(([p, c]) => {
         setProduction(p)
         setCues(c)
-        setEvents(e)
         setLoaded(true)
       })
       .catch((e) => setError(e.message))
-  }, [productionId])
+  }, [productionId, openRun])
 
   const { contextSafe } = useGSAP({ scope })
 
@@ -98,10 +107,10 @@ export default function Board({ productionId, onBack }) {
     setBusy(true)
     setError('')
     try {
-      const event = await api.fire(cues[nextIdx].id, runLabel)
-      setEvents((prev) => [...prev, event])
+      const { event, state } = await api.go(run.id)
+      setRun((prev) => ({ ...prev, events: [...prev.events, event], state }))
       // The settle effect below tweens the states; this adds the GO flash on top.
-      const card = cardRefs.current[nextIdx]
+      const card = cardRefs.current[cues.findIndex((c) => c.id === state.active_cue)]
       gsap.fromTo(card, FLASH.from, FLASH.to)
       card.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
     } catch (e) {
@@ -147,15 +156,14 @@ export default function Board({ productionId, onBack }) {
   // When preview ends (or the run changes), settle the board back to the recorded run.
   useEffect(() => {
     if (loaded && !previewing) applyStates(activeIdx, 0.4)
-  }, [loaded, previewing, activeIdx, applyStates])
+  }, [loaded, previewing, activeIdx, cues, applyStates])
 
   async function loadRun(e) {
     e.preventDefault()
     const label = runDraft.trim()
-    if (!label || label === runLabel) return
+    if (!label || label === run?.label) return
     try {
-      setEvents(await api.events(productionId, label))
-      setRunLabel(label)
+      await openRun(label)
     } catch (err) {
       setError(err.message)
     }
@@ -169,11 +177,15 @@ export default function Board({ productionId, onBack }) {
         label: newCue.label,
         page: newCue.page ? Number(newCue.page) : null,
       })
-      flushSync(() => setCues((prev) => [...prev, created]))
-      const i = cardRefs.current.length - 1
-      gsap.set(cardRefs.current[i], LOOK[stateAt(i, activeIdx)])
+      // Cues are ordered by number, so a new cue can land anywhere in the list.
+      const sorted = [...cues, created].sort((a, b) => Number(a.number) - Number(b.number))
+      flushSync(() => setCues(sorted))
+      cardRefs.current.length = sorted.length
+      const i = sorted.indexOf(created)
       gsap.from(cardRefs.current[i].parentElement, { y: 16, autoAlpha: 0, duration: 0.4, ease: 'power3.out' })
       setNewCue({ number: '', label: '', page: '' })
+      // The next cue may have changed; refresh the run's state from the server.
+      setRun(await api.run(run.id))
     } catch (err) {
       setError(err.message)
     }
@@ -257,12 +269,14 @@ export default function Board({ productionId, onBack }) {
             </button>
           )}
 
-          <h3>Run log · {runLabel}</h3>
+          <h3>Run log · {run?.label}</h3>
           <ol className="log">
             {events.length === 0 && <li className="muted">No cues fired in this run.</li>}
             {events.map((e) => (
               <li key={e.id}>
-                <time>{new Date(e.fired_at).toLocaleTimeString()}</time> Q{e.cue_number} {e.cue_label}
+                <time>{new Date(e.fired_at).toLocaleTimeString()}</time>
+                {e.action !== 'go' && <b className="log-action">{e.action.toUpperCase()} </b>}
+                {e.action !== 'reset' && `Q${e.cue_number} ${e.cue_label}`}
               </li>
             ))}
           </ol>

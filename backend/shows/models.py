@@ -7,8 +7,10 @@ class Production(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="productions"
     )
     name = models.CharField(max_length=200)
+    company = models.CharField(max_length=200, blank=True)
     venue = models.CharField(max_length=200, blank=True)
     performance_date = models.DateField(null=True, blank=True)
+    notes = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -20,20 +22,54 @@ class Production(models.Model):
 
 class Cue(models.Model):
     production = models.ForeignKey(Production, on_delete=models.CASCADE, related_name="cues")
-    # Char, not int: stage managers use numbers like "102" and "102.5".
-    number = models.CharField(max_length=20)
+    # Decimal so point cues sort where they belong: 12 < 12.5 < 13 < 100.
+    number = models.DecimalField(max_digits=10, decimal_places=4)
     label = models.CharField(max_length=200, blank=True)
     page = models.PositiveIntegerField(null=True, blank=True)
-    order = models.PositiveIntegerField()
+    notes = models.TextField(blank=True)
+    # Eos "scene" text: the cue that starts a scene carries its name.
+    scene = models.CharField(max_length=200, blank=True)
 
     class Meta:
-        ordering = ["order", "id"]
+        ordering = ["number"]
         constraints = [
-            models.UniqueConstraint(fields=["production", "order"], name="unique_cue_order"),
+            models.UniqueConstraint(fields=["production", "number"], name="unique_cue_number"),
         ]
 
     def __str__(self):
-        return f"Q{self.number} {self.label}".strip()
+        return f"Q{format_number(self.number)} {self.label}".strip()
+
+
+def format_number(number):
+    """12.5000 -> "12.5", 100.0000 -> "100" (never "1E+2")."""
+    if number is None:
+        return None
+    return format(number.normalize(), "f")
+
+
+class Run(models.Model):
+    class Kind(models.TextChoices):
+        REHEARSAL = "rehearsal"
+        TECH = "tech"
+        PREVIEW = "preview"
+        PERFORMANCE = "performance"
+        OTHER = "other"
+
+    production = models.ForeignKey(Production, on_delete=models.CASCADE, related_name="runs")
+    label = models.CharField(max_length=100)
+    kind = models.CharField(max_length=20, choices=Kind.choices, default=Kind.OTHER)
+    created_at = models.DateTimeField(auto_now_add=True)
+    ended_at = models.DateTimeField(null=True, blank=True)
+    notes = models.TextField(blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(fields=["production", "label"], name="unique_run_label"),
+        ]
+
+    def __str__(self):
+        return f"{self.production}: {self.label}"
 
 
 class AppendOnlyError(Exception):
@@ -41,15 +77,28 @@ class AppendOnlyError(Exception):
 
 
 class CueEvent(models.Model):
-    """One firing of a cue during a run. Insert-only.
+    """One operator action during a run. Insert-only.
 
     Enforced in the app layer only: saving an existing row or deleting an
     instance raises. The database itself does not block UPDATE/DELETE, and
-    deleting a cue or production cascades through its events.
+    deleting a run or production cascades through its events.
+
+    The cue's number and label are copied at the moment of the action, so
+    editing or deleting the cue later does not rewrite the log.
     """
 
-    cue = models.ForeignKey(Cue, on_delete=models.CASCADE, related_name="events")
-    run_label = models.CharField(max_length=100)
+    class Action(models.TextChoices):
+        GO = "go"
+        BACK = "back"
+        GOTO = "goto"
+        RESET = "reset"
+
+    run = models.ForeignKey(Run, on_delete=models.CASCADE, related_name="events")
+    action = models.CharField(max_length=10, choices=Action.choices)
+    # The cue that became active; null after a reset or if the cue was deleted.
+    cue = models.ForeignKey(Cue, on_delete=models.SET_NULL, null=True, blank=True, related_name="events")
+    cue_number = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
+    cue_label = models.CharField(max_length=200, blank=True)
     fired_at = models.DateTimeField(auto_now_add=True)
     note = models.CharField(max_length=500, blank=True)
 
@@ -65,4 +114,4 @@ class CueEvent(models.Model):
         raise AppendOnlyError("CueEvent rows are insert-only.")
 
     def __str__(self):
-        return f"{self.run_label}: {self.cue} @ {self.fired_at:%H:%M:%S}"
+        return f"{self.run.label}: {self.action} Q{format_number(self.cue_number)} @ {self.fired_at:%H:%M:%S}"

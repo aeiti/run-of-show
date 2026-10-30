@@ -32,7 +32,12 @@ export const api = {
   production: (id) => request(`/productions/${id}/`),
   cues: (id) => request(`/productions/${id}/cues/`),
   createCue: (id, data) => request(`/productions/${id}/cues/`, { method: 'POST', body: data }),
-  events: (id, run) => request(`/productions/${id}/events/?run=${encodeURIComponent(run)}`),
-  fire: (cueId, runLabel) =>
-    request(`/cues/${cueId}/fire/`, { method: 'POST', body: { run_label: runLabel } }),
+  runs: (id) => request(`/productions/${id}/runs/`),
+  createRun: (id, data) => request(`/productions/${id}/runs/`, { method: 'POST', body: data }),
+  run: (runId) => request(`/runs/${runId}/`),
+  // Operator actions return { event, state }.
+  go: (runId, cue) => request(`/runs/${runId}/go/`, { method: 'POST', body: cue ? { cue } : {} }),
+  back: (runId) => request(`/runs/${runId}/back/`, { method: 'POST' }),
+  goto: (runId, cue) => request(`/runs/${runId}/goto/`, { method: 'POST', body: { cue } }),
+  reset: (runId) => request(`/runs/${runId}/reset/`, { method: 'POST' }),
 }
