@@ -4,11 +4,11 @@ from django.db import migrations, models
 class Migration(migrations.Migration):
     """Opening and closing dates for a production; planned and actual start for a run.
 
-    ``performance_date`` is copied to ``opening_date`` and dropped in 0010.
+    ``performance_date`` is copied to ``opening_date`` and dropped in 0012.
     """
 
     dependencies = [
-        ("shows", "0008_cue_notes"),
+        ("shows", "0010_production_logo"),
     ]
 
     operations = [

@@ -82,12 +82,12 @@ def test_a_patch_is_checked_against_the_saved_date(show):
     assert (show.production.opening_date, show.production.closing_date) == (date(2026, 11, 14), date(2026, 11, 29))
 
 
-# Migration 0010
+# Migration 0012
 
 
 @pytest.mark.django_db(transaction=True)
 def test_migration_moves_the_performance_date_to_opening_and_backfills_starts():
-    before, after = [("shows", "0009_performance_times")], [("shows", "0010_backfill_performance_times")]
+    before, after = [("shows", "0011_performance_times")], [("shows", "0012_backfill_performance_times")]
     executor = MigrationExecutor(connection)
     leaf = executor.loader.graph.leaf_nodes()
     try:

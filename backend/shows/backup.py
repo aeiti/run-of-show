@@ -68,7 +68,7 @@ def import_production(owner, data, **details):
         events = run_data.pop("events", [])
         notes = run_data.pop("cue_notes", [])
         if "started_at" not in run_data:
-            # A version 1 file has no start; as in migration 0010, it was the first GO.
+            # A version 1 file has no start; as in migration 0012, it was the first GO.
             run_data["started_at"] = first_start(events, run_data.get("ended_at"))
         run = Run.objects.create(production=production, **run_data)
         Run.objects.filter(pk=run.pk).update(created_at=created_at)

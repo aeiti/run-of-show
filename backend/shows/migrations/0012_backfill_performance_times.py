@@ -31,7 +31,7 @@ def backwards(apps, schema_editor):
 
 class Migration(migrations.Migration):
     dependencies = [
-        ("shows", "0009_performance_times"),
+        ("shows", "0011_performance_times"),
     ]
 
     operations = [
