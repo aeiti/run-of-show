@@ -5,6 +5,7 @@ import Login from './Login'
 import Productions from './Productions'
 import Board from './Board'
 import Report from './report/Report'
+import Follow from './follow/Follow'
 import Signup from './account/Signup'
 import Profile from './account/Profile'
 import Users from './admin/Users'
@@ -83,6 +84,7 @@ export default function App() {
           element={<BoardRoute me={me} onSignedOut={sessionEnded} />}
         />
         <Route path="/productions/:productionId/runs/:runId/report" element={<ReportRoute />} />
+        <Route path="/productions/:productionId/follow" element={<FollowRoute onSignedOut={sessionEnded} />} />
         {reset}
         <Route path="/signup" element={<Navigate to="/" replace />} />
         <Route path="*" element={<Navigate to="/" replace />} />
@@ -99,6 +101,19 @@ function ProductionsRoute() {
 function ReportRoute() {
   const { productionId, runId } = useParams()
   return <Report key={runId} productionId={Number(productionId)} runId={Number(runId)} />
+}
+
+function FollowRoute({ onSignedOut }) {
+  const { productionId } = useParams()
+  const navigate = useNavigate()
+  return (
+    <Follow
+      key={productionId}
+      productionId={Number(productionId)}
+      onGone={() => navigate('/')}
+      onSignedOut={onSignedOut}
+    />
+  )
 }
 
 function BoardRoute({ me, onSignedOut }) {
