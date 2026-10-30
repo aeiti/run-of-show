@@ -159,10 +159,16 @@ class RunSerializer(serializers.ModelSerializer):
         return value
 
 
+class HoldStateSerializer(serializers.Serializer):
+    since = serializers.DateTimeField()
+    reason = serializers.CharField()
+
+
 class RunStateSerializer(serializers.Serializer):
     active_cue = serializers.IntegerField(allow_null=True)
     active_number = CueNumberField(allow_null=True)
     next_cue = serializers.IntegerField(allow_null=True)
+    hold = HoldStateSerializer(allow_null=True)
 
 
 class RunDetailSerializer(RunSerializer):
@@ -178,6 +184,10 @@ class RunDetailSerializer(RunSerializer):
 
 class CueTargetSerializer(serializers.Serializer):
     cue = serializers.IntegerField()
+
+
+class HoldSerializer(serializers.Serializer):
+    reason = serializers.CharField(max_length=500)
 
 
 class OptionalCueTargetSerializer(serializers.Serializer):

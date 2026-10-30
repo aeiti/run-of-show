@@ -135,10 +135,15 @@ class CueEvent(models.Model):
         BACK = "back"
         GOTO = "goto"
         RESET = "reset"
+        # A hold pauses the run (``note`` says why) until a resume. Both
+        # record the cue that was active, but never change it.
+        HOLD = "hold"
+        RESUME = "resume"
 
     run = models.ForeignKey(Run, on_delete=models.CASCADE, related_name="events")
     action = models.CharField(max_length=10, choices=Action.choices)
-    # The cue that became active; null after a reset or if the cue was deleted.
+    # The cue that became active (for a hold or resume, the cue that was
+    # active); null after a reset or if the cue was deleted.
     cue = models.ForeignKey(Cue, on_delete=models.SET_NULL, null=True, blank=True, related_name="events")
     cue_number = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
     cue_label = models.CharField(max_length=200, blank=True)

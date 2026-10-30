@@ -1,9 +1,20 @@
 import { useState } from 'react'
+import { formatClock } from './playbackSteps'
 
 const KINDS = ['rehearsal', 'tech', 'preview', 'performance', 'other']
 
 const runName = (r) =>
   [r.label, r.kind, new Date(r.created_at).toLocaleDateString(), r.ended_at && 'ended'].filter(Boolean).join(' · ')
+
+function logText(events, i) {
+  const e = events[i]
+  if (e.action === 'hold') return [e.note, e.cue_number && `at Q${e.cue_number}`].filter(Boolean).join(' · ')
+  if (e.action === 'resume') {
+    const held = events.slice(0, i).findLast((x) => x.action === 'hold')
+    return held ? `after ${formatClock((Date.parse(e.fired_at) - Date.parse(held.fired_at)) / 1000)}` : ''
+  }
+  return e.action === 'reset' ? '' : `Q${e.cue_number} ${e.cue_label}`
+}
 
 /** Pick, start or end a run, and show its log. */
 export default function RunPanel({ runs, run, canOperate, onSelect, onCreate, onEnd, onExport }) {
@@ -96,11 +107,11 @@ export default function RunPanel({ runs, run, canOperate, onSelect, onCreate, on
       </div>
       <ol className="log">
         {events.length === 0 && <li className="muted">Nothing fired in this run yet.</li>}
-        {events.map((e) => (
+        {events.map((e, i) => (
           <li key={e.id}>
             <time>{new Date(e.fired_at).toLocaleTimeString()}</time>
             {e.action !== 'go' && <b className="log-action">{e.action.toUpperCase()} </b>}
-            {e.action !== 'reset' && `Q${e.cue_number} ${e.cue_label}`}
+            {logText(events, i)}
           </li>
         ))}
       </ol>

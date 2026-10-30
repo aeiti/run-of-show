@@ -13,6 +13,7 @@ from .serializers import (
     CueEventSerializer,
     CueSerializer,
     CueTargetSerializer,
+    HoldSerializer,
     InviteSerializer,
     MembershipSerializer,
     OptionalCueTargetSerializer,
@@ -173,6 +174,8 @@ class RunViewSet(mixins.RetrieveModelMixin, mixins.UpdateModelMixin, viewsets.Ge
         "back": "operate",
         "goto": "operate",
         "reset": "operate",
+        "hold": "operate",
+        "resume": "operate",
         "end": "operate",
     }
 
@@ -220,6 +223,17 @@ class RunViewSet(mixins.RetrieveModelMixin, mixins.UpdateModelMixin, viewsets.Ge
     @action(detail=True, methods=["post"])
     def reset(self, request, pk=None):
         return self._act(request, pk, services.reset)
+
+    @action(detail=True, methods=["post"])
+    def hold(self, request, pk=None):
+        """Pause the run; ``reason`` is required. GO, BACK, GOTO and RESET are refused until a resume."""
+        body = HoldSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        return self._act(request, pk, lambda run: services.hold(run, body.validated_data["reason"]))
+
+    @action(detail=True, methods=["post"])
+    def resume(self, request, pk=None):
+        return self._act(request, pk, services.resume)
 
     @action(detail=True, methods=["get"])
     def export(self, request, pk=None):

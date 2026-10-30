@@ -155,6 +155,12 @@ button.danger:not(.ghost) { background: #2a1214; }
 .run-panel select { flex: 1; min-width: 0; }
 select { font: inherit; color: inherit; background: #181b21; border: 1px solid var(--line); border-radius: 4px; padding: 0.45rem 0.5rem; }
 .ended { font-size: 0.75rem; color: var(--stby); margin: 0.2rem 0 0; }
+.hold-banner { border: 1px solid var(--err); border-radius: 4px; background: #2a1214; padding: 0.6rem 0.7rem; margin-bottom: 0.6rem; color: var(--err); }
+.hold-banner strong { letter-spacing: 0.12em; }
+.hold-banner time { margin-left: 0.4rem; font-variant-numeric: tabular-nums; }
+.hold-reason { margin: 0.35rem 0 0; color: var(--text); font-size: 0.8rem; white-space: pre-wrap; }
+.resume { border-color: var(--go); color: var(--go); background: #0d3324; font-weight: 700; letter-spacing: 0.12em; }
+.playback-hold { display: none; font-size: 0.75rem; }
 .preview-banner { color: var(--stby); font-size: 0.75rem; letter-spacing: 0.12em; margin: 0 0 0.5rem; }
 .log { list-style: none; margin: 0; padding: 0; font-size: 0.75rem; max-height: 180px; overflow-y: auto; display: grid; gap: 0.25rem; }
 .log time { color: var(--muted); margin-right: 0.4rem; }

@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import gsap from 'gsap'
 import { useGSAP } from '@gsap/react'
 import { FLASH, LOOK, playheadPos } from './looks'
-import { formatClock, previewSteps, recordedSteps } from './playbackSteps'
+import { formatClock, holdSpans, previewSteps, recordedSteps } from './playbackSteps'
 import { cueStates, playheadIndex } from './state'
 
 const SPEEDS = [1, 2, 5, 20]
@@ -19,9 +19,11 @@ export default function Playback({ scope, cues, events, cardRefs, markerRef, fil
   const tl = useRef(null)
   const scrubRef = useRef(null)
   const clockRef = useRef(null)
+  const holdRefs = useRef([])
 
   const { contextSafe } = useGSAP({ scope })
   const recorded = events.length > 0
+  const holds = holdSpans(events)
 
   // Write progress straight to the DOM: onUpdate runs every frame, and a
   // React state update there would re-render the board 60 times a second.
@@ -84,6 +86,12 @@ export default function Playback({ scope, cues, events, cardRefs, markerRef, fil
       timeline.to(fillRef.current, { width: pos, duration: 0.4, ease: 'power3.inOut' }, at)
       looks = next
     })
+    // Each hold's banner shows from the hold to its resume (or to the end).
+    holdRefs.current.slice(0, holds.length).forEach((el, i) => {
+      timeline.set(el, { display: 'none' }, 0)
+      timeline.set(el, { display: 'block' }, holds[i].t + lead)
+      if (holds[i].end !== null) timeline.set(el, { display: 'none' }, holds[i].end + lead)
+    })
     timeline.to({}, { duration: 1 })
     timeline.timeScale(speed)
     return timeline
@@ -109,6 +117,7 @@ export default function Playback({ scope, cues, events, cardRefs, markerRef, fil
   const stop = contextSafe(() => {
     tl.current?.kill()
     tl.current = null
+    gsap.set(holdRefs.current.slice(0, holds.length), { display: 'none' })
     setPlaying(false)
     onActiveChange(false) // the board settles back to the live run state
   })
@@ -127,9 +136,19 @@ export default function Playback({ scope, cues, events, cardRefs, markerRef, fil
 
   const what = recorded ? `Recorded run · ${events.length} events` : 'Nothing recorded yet · evenly spaced preview'
 
+  // Rendered first in both states, so they are the same elements before and
+  // after playback starts: the timeline is built (and finds them) before the
+  // controls appear. They stay display: none until their moment.
+  const banners = holds.map((h, i) => (
+    <p key={h.t} className="hold-banner playback-hold" ref={(el) => (holdRefs.current[i] = el)}>
+      <strong>HOLD</strong> {h.reason}
+    </p>
+  ))
+
   if (!active) {
     return (
       <div className="playback">
+        {banners}
         <button className="ghost wide" onClick={start} disabled={!cues.length}>
           {recorded ? '▶ Play back this run' : '▶ Preview run'}
         </button>
@@ -139,6 +158,7 @@ export default function Playback({ scope, cues, events, cardRefs, markerRef, fil
 
   return (
     <div className="playback on">
+      {banners}
       <p className="preview-banner">PLAYBACK · not recorded</p>
       <p className="muted small-print">{what}</p>
       <div className="row">
