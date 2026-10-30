@@ -1,11 +1,13 @@
-from django.http import HttpResponse
+import json
+
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import get_object_or_404
 from django.utils.text import slugify
 from rest_framework import mixins, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from . import csv_io, services
+from . import backup, csv_io, services
 from .models import Cue, Production, Run
 from .serializers import (
     CueEventSerializer,
@@ -28,6 +30,36 @@ class ProductionViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
+
+    @action(detail=True, methods=["post"])
+    def duplicate(self, request, pk=None):
+        """A copy of the production and its cue list, without runs. Body fields override the copy's details."""
+        production = self.get_object()
+        details = ProductionSerializer(data=request.data, partial=True)
+        details.is_valid(raise_exception=True)
+        copy = backup.duplicate(production, request.user, **details.validated_data)
+        return Response(ProductionSerializer(copy).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get"])
+    def export(self, request, pk=None):
+        production = self.get_object()
+        response = JsonResponse(backup.export_production(production), json_dumps_params={"indent": 2})
+        response["Content-Disposition"] = f'attachment; filename="{slugify(production.name)}.json"'
+        return response
+
+    @action(detail=False, methods=["post"], url_path="import")
+    def import_production(self, request):
+        """Upload (``file``) or post a production file as the body; always creates a new production."""
+        upload = request.FILES.get("file")
+        if upload:
+            try:
+                data = json.loads(upload.read())
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                return Response({"detail": "The file is not valid JSON."}, status=status.HTTP_400_BAD_REQUEST)
+        else:
+            data = request.data
+        production = backup.import_production(request.user, backup.validate(data))
+        return Response(ProductionSerializer(production).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get", "post"])
     def cues(self, request, pk=None):
