@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { follow } from './live'
-import { socketUrl } from './api'
+import { defaultApiUrl, socketUrl } from './api'
 
 // A stand-in for the browser's WebSocket that the test drives by hand.
 class FakeSocket {
@@ -125,5 +125,19 @@ describe('follow', () => {
 describe('socketUrl', () => {
   it('puts the path on the API host with a ws scheme', () => {
     expect(socketUrl('/ws/productions/3/')).toBe('ws://localhost:5600/ws/productions/3/')
+  })
+})
+
+describe('defaultApiUrl', () => {
+  it('uses the host the board was loaded from, so other machines reach this one', () => {
+    expect(defaultApiUrl({ protocol: 'http:', hostname: '192.168.1.241' })).toBe('http://192.168.1.241:5600/api')
+    expect(defaultApiUrl({ protocol: 'http:', hostname: 'adams-macbook-pro.local' })).toBe(
+      'http://adams-macbook-pro.local:5600/api',
+    )
+  })
+
+  it('keeps https, and falls back to localhost outside a browser', () => {
+    expect(defaultApiUrl({ protocol: 'https:', hostname: 'show.example' })).toBe('https://show.example:5600/api')
+    expect(defaultApiUrl(undefined)).toBe('http://localhost:5600/api')
   })
 })

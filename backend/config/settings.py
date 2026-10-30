@@ -29,7 +29,13 @@ SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', 'dev-only-insecure-key')
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.environ.get('DJANGO_DEBUG', '0') == '1'
 
-ALLOWED_HOSTS = ['localhost', '127.0.0.1']
+# Names or addresses this machine is reached by on the local network, such as
+# "adams-macbook-pro.local,192.168.1.241", so tablets and other computers can
+# use the board. They are added to ALLOWED_HOSTS here and to the allowed
+# origins (port 3200) below. Unset, only this machine can use it.
+LAN_HOSTS = [h.strip() for h in os.environ.get('LAN_HOSTS', '').split(',') if h.strip()]
+
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', *LAN_HOSTS]
 
 
 # Application definition
@@ -206,9 +212,10 @@ EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', '0') == '1'
 DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'Run of Show <noreply@localhost>')
 
+# Also the origins allowed to open a live-update socket (see asgi.py).
 CORS_ALLOWED_ORIGINS = [
     o for o in os.environ.get('CORS_ALLOWED_ORIGINS', 'http://localhost:3200').split(',') if o
-]
+] + [f'http://{host}:3200' for host in LAN_HOSTS]
 # Let the frontend read the download filename on CSV exports (cross-origin fetch
 # hides non-safelisted response headers otherwise).
 CORS_EXPOSE_HEADERS = ['Content-Disposition']

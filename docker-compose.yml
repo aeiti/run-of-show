@@ -9,7 +9,8 @@ services:
       POSTGRES_USER: runofshow
       POSTGRES_PASSWORD: runofshow
     ports:
-      - "5432:5432"
+      # This machine only: the password is in this file.
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -25,6 +26,9 @@ services:
       MEDIA_ROOT: /app/media
       CORS_ALLOWED_ORIGINS: http://localhost:3200
       FRONTEND_URL: http://localhost:3200
+      # Set LAN_HOSTS (in a .env file beside this one, or the shell) to use the
+      # board from other machines, e.g. LAN_HOSTS=adams-macbook-pro.local,192.168.1.241
+      LAN_HOSTS: ${LAN_HOSTS:-}
     ports:
       - "5600:5600"
     volumes:
@@ -37,8 +41,8 @@ services:
   frontend:
     build: ./frontend
     environment:
-      # The browser calls the API, so this is the host's address, not the container's.
-      VITE_API_URL: http://localhost:5600/api
+      # The board calls the API on port 5600 of whichever host it was loaded from.
+      LAN_HOSTS: ${LAN_HOSTS:-}
     ports:
       - "3200:3200"
     volumes:
