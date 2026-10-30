@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
+from accounts.views import AdminUserViewSet
 from shows.views import CueViewSet, MembershipViewSet, ProductionViewSet, RunViewSet
 
 router = DefaultRouter()
@@ -9,6 +10,7 @@ router.register("productions", ProductionViewSet, basename="production")
 router.register("cues", CueViewSet, basename="cue")
 router.register("runs", RunViewSet, basename="run")
 router.register("memberships", MembershipViewSet, basename="membership")
+router.register("admin/users", AdminUserViewSet, basename="admin-user")
 
 urlpatterns = [
     path("admin/", admin.site.urls),

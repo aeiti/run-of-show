@@ -33,7 +33,9 @@ class Command(BaseCommand):
         user, created = User.objects.get_or_create(username=DEMO_USERNAME)
         if created:
             user.set_password(DEMO_PASSWORD)
-            user.save()
+        # An app admin, so the demo shows user management. Not a Django superuser.
+        user.is_staff = True
+        user.save()
         Token.objects.get_or_create(user=user)
 
         production, _ = Production.objects.get_or_create(

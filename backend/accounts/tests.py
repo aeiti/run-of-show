@@ -60,7 +60,10 @@ def test_signup_rejects_taken_names_emails_and_weak_passwords(alice):
 def test_login_and_logout(alice):
     client = APIClient()
     assert client.post("/api/auth/token/", {"username": "alice", "password": "wrong"}).status_code == 400
+    assert alice.last_login is None
     token = client.post("/api/auth/token/", {"username": "alice", "password": PASSWORD}).data["token"]
+    alice.refresh_from_db()
+    assert alice.last_login is not None
 
     client.credentials(HTTP_AUTHORIZATION=f"Token {token}")
     assert client.post("/api/auth/logout/").status_code == 204
