@@ -15,7 +15,7 @@ class CueInline(admin.TabularInline):
 
 @admin.register(Production)
 class ProductionAdmin(admin.ModelAdmin):
-    list_display = ["name", "company", "venue", "performance_date", "owner", "created_at"]
+    list_display = ["name", "company", "venue", "opening_date", "closing_date", "owner", "created_at"]
     list_filter = ["owner"]
     inlines = [MembershipInline, CueInline]
 
@@ -28,7 +28,7 @@ class CueAdmin(admin.ModelAdmin):
 
 @admin.register(Run)
 class RunAdmin(admin.ModelAdmin):
-    list_display = ["label", "kind", "production", "created_at", "ended_at"]
+    list_display = ["label", "kind", "production", "scheduled_start", "started_at", "ended_at"]
     list_filter = ["production", "kind"]
 
 

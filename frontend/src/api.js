@@ -124,6 +124,8 @@ export const api = {
   runs: (id) => request(`/productions/${id}/runs/`),
   createRun: (id, data) => request(`/productions/${id}/runs/`, { method: 'POST', body: data }),
   run: (runId) => request(`/runs/${runId}/`),
+  // Label, kind, notes, scheduled_start; started_at and ended_at to correct them after the fact.
+  updateRun: (runId, data) => request(`/runs/${runId}/`, { method: 'PATCH', body: data }),
   // Operator actions return { event, state }.
   go: (runId, cue) => request(`/runs/${runId}/go/`, { method: 'POST', body: cue ? { cue } : {} }),
   back: (runId) => request(`/runs/${runId}/back/`, { method: 'POST' }),

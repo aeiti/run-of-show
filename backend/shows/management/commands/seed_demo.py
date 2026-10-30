@@ -41,7 +41,11 @@ class Command(BaseCommand):
         production, _ = Production.objects.get_or_create(
             owner=user,
             name="The Keeper's Light",
-            defaults={"venue": "Studio Theatre", "performance_date": datetime.date(2026, 11, 14)},
+            defaults={
+                "venue": "Studio Theatre",
+                "opening_date": datetime.date(2026, 11, 14),
+                "closing_date": datetime.date(2026, 11, 29),
+            },
         )
         if not production.cues.exists():
             Cue.objects.bulk_create(

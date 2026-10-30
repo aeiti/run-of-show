@@ -17,7 +17,7 @@ from django.core.files.base import ContentFile
 from django.db import transaction
 from django.utils import timezone
 
-from . import uploads
+from . import services, uploads
 from .models import Cue, CueEvent, CueNote, Production, Run
 from .serializers import (
     BACKUP_FORMAT,
@@ -67,6 +67,9 @@ def import_production(owner, data, **details):
         created_at = run_data.pop("created_at")
         events = run_data.pop("events", [])
         notes = run_data.pop("cue_notes", [])
+        if "started_at" not in run_data:
+            # A version 1 file has no start; as in migration 0010, it was the first GO.
+            run_data["started_at"] = first_start(events, run_data.get("ended_at"))
         run = Run.objects.create(production=production, **run_data)
         Run.objects.filter(pk=run.pk).update(created_at=created_at)
 
@@ -96,6 +99,13 @@ def import_production(owner, data, **details):
         production.logo.save(f"logo.{ext}", ContentFile(image))
 
     return production
+
+
+def first_start(events, ended_at):
+    starts = sorted(e["fired_at"] for e in events if e["action"] in services.STARTS)
+    if starts and (ended_at is None or starts[0] <= ended_at):
+        return starts[0]
+    return None
 
 
 def duplicate(production, owner, **details):
