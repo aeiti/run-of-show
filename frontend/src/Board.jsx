@@ -50,6 +50,7 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
   const loaded = Boolean(production && cues && run)
   const live = mode === 'live'
   const ended = Boolean(run?.ended_at)
+  const hold = run?.state.hold ?? null
   // What this user's role on the production allows; the server checks it too.
   const canOperate = can(production?.role, 'operate')
   const canEdit = can(production?.role, 'edit')
@@ -162,16 +163,22 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
     if (loaded && live && !playingBack) applyStates(states, playIdx, 0.4)
   }, [loaded, live, playingBack, states, playIdx, applyStates])
 
-  // GO, BACK, GOTO and RESET all append one event and return the new state.
-  const act = contextSafe(async (action, cueId) => {
-    if (!live || busy || playingBack || !run || ended || !canOperate) return
-    if (action === 'go' && !nextCue) return
+  // GO, BACK, GOTO, RESET, HOLD and RESUME all append one event and return
+  // the new state. `arg` is the cue for GOTO and the reason for HOLD.
+  // Resolves to whether the action went through.
+  const act = contextSafe(async (action, arg) => {
+    if (!live || busy || playingBack || !run || ended || !canOperate) return false
+    // Held: only RESUME. Not held: anything but RESUME.
+    if (Boolean(hold) !== (action === 'resume')) return false
+    if (action === 'go' && !nextCue) return false
     setBusy(true)
     setError('')
     try {
-      const target = action === 'go' ? (loadedCue ?? undefined) : cueId
+      const target = action === 'go' ? (loadedCue ?? undefined) : arg
       const { event, state } = await api[action](run.id, target)
       setRun((prev) => ({ ...prev, events: [...prev.events, event], state }))
+      // A hold or resume leaves the cues (and the loaded cue) as they are.
+      if (action === 'hold' || action === 'resume') return true
       setLoadedCue(null)
       // The settle effect tweens the states; this adds the flash and the fade bar on top.
       const index = cueList.findIndex((c) => c.id === state.active_cue)
@@ -182,8 +189,10 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
         gsap.fromTo(card.querySelector('.cue-fade'), { scaleX: 0 }, { scaleX: 1, duration: fade, ease: 'none' })
         card.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
       }
+      return true
     } catch (e) {
       setError(e.message)
+      return false
     } finally {
       setBusy(false)
     }
@@ -258,7 +267,7 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
     return () => window.removeEventListener('keydown', onKey)
   }, [live, playingBack, act, cueList, run, loadedCue, ended])
 
-  const goLabel = ended ? 'ENDED' : nextCue || cueList.length === 0 ? 'GO' : 'END'
+  const goLabel = ended ? 'ENDED' : hold ? 'HOLD' : nextCue || cueList.length === 0 ? 'GO' : 'END'
   const nextText = nextCue
     ? `${loadedCue ? 'Loaded' : 'Next'}: Q${nextCue.number} ${nextCue.label}`
     : 'End of cue list'
@@ -375,6 +384,7 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
             <>
               <Transport
                 disabled={busy || playingBack || !run || ended || !canOperate}
+                hold={hold}
                 goLabel={goLabel}
                 canGo={Boolean(nextCue)}
                 canBack={canBack}

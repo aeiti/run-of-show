@@ -113,6 +113,8 @@ export const api = {
   back: (runId) => request(`/runs/${runId}/back/`, { method: 'POST' }),
   goto: (runId, cue) => request(`/runs/${runId}/goto/`, { method: 'POST', body: { cue } }),
   reset: (runId) => request(`/runs/${runId}/reset/`, { method: 'POST' }),
+  hold: (runId, reason) => request(`/runs/${runId}/hold/`, { method: 'POST', body: { reason } }),
+  resume: (runId) => request(`/runs/${runId}/resume/`, { method: 'POST' }),
   endRun: (runId) => request(`/runs/${runId}/end/`, { method: 'POST' }),
   // body is FormData with file or text, mode, list and dry_run.
   importCues: (id, form) => request(`/productions/${id}/cues/import/`, { method: 'POST', body: form }),

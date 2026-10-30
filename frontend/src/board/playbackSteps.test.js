@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatClock, previewSteps, recordedSteps } from './playbackSteps'
+import { formatClock, holdSpans, previewSteps, recordedSteps } from './playbackSteps'
 
 const cues = [
   { id: 1, number: '1', time: '3', duration: null },
@@ -66,5 +66,30 @@ describe('formatClock', () => {
     expect(formatClock(0)).toBe('0:00')
     expect(formatClock(75.9)).toBe('1:15')
     expect(formatClock(3723)).toBe('1:02:03')
+  })
+})
+
+describe('holds', () => {
+  const events = [
+    { fired_at: at(0), action: 'go', cue_number: '1' },
+    { fired_at: at(4), action: 'hold', cue_number: '1', note: 'Audience medical' },
+    { fired_at: at(9), action: 'resume', cue_number: '1' },
+    { fired_at: at(12), action: 'go', cue_number: '2' },
+    { fired_at: at(20), action: 'hold', cue_number: '2', note: 'Show stop' },
+  ]
+
+  it('leaves holds out of the cue steps, so they never move or flash a cue', () => {
+    const steps = recordedSteps(events, cues)
+    expect(steps.map((s) => [s.t, s.action, s.state.active_cue])).toEqual([
+      [0, 'go', 1],
+      [12, 'go', 2],
+    ])
+  })
+
+  it('pairs each hold with the resume after it; a hold never resumed stays open', () => {
+    expect(holdSpans(events)).toEqual([
+      { t: 4, end: 9, reason: 'Audience medical', cue_number: '1' },
+      { t: 20, end: null, reason: 'Show stop', cue_number: '2' },
+    ])
   })
 })
