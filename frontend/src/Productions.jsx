@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from './api'
+import { ROLES } from './access'
 
 const blank = { name: '', company: '', venue: '', performance_date: '' }
 
@@ -43,6 +44,11 @@ export default function Productions({ onOpen }) {
                 <strong>{p.name}</strong>
                 <span className="muted">
                   {[p.company, p.venue, p.performance_date].filter(Boolean).join(' · ')}
+                  {p.role !== 'owner' && (
+                    <span className="shared-badge">
+                      {ROLES[p.role]} · {p.owner.display_name || p.owner.username}
+                    </span>
+                  )}
                 </span>
               </button>
             </li>

@@ -94,6 +94,12 @@ export const api = {
   createCue: (id, data) => request(`/productions/${id}/cues/`, { method: 'POST', body: data }),
   updateCue: (cueId, data) => request(`/cues/${cueId}/`, { method: 'PATCH', body: data }),
   deleteCue: (cueId) => request(`/cues/${cueId}/`, { method: 'DELETE' }),
+  // { owner, members: [{ id, user, role }] }
+  members: (id) => request(`/productions/${id}/members/`),
+  // user is a username or email.
+  addMember: (id, user, role) => request(`/productions/${id}/members/`, { method: 'POST', body: { user, role } }),
+  updateMember: (membershipId, role) => request(`/memberships/${membershipId}/`, { method: 'PATCH', body: { role } }),
+  removeMember: (membershipId) => request(`/memberships/${membershipId}/`, { method: 'DELETE' }),
   runs: (id) => request(`/productions/${id}/runs/`),
   createRun: (id, data) => request(`/productions/${id}/runs/`, { method: 'POST', body: data }),
   run: (runId) => request(`/runs/${runId}/`),

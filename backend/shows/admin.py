@@ -1,6 +1,11 @@
 from django.contrib import admin
 
-from .models import Cue, CueEvent, Production, Run
+from .models import Cue, CueEvent, Membership, Production, Run
+
+
+class MembershipInline(admin.TabularInline):
+    model = Membership
+    extra = 0
 
 
 class CueInline(admin.TabularInline):
@@ -12,7 +17,7 @@ class CueInline(admin.TabularInline):
 class ProductionAdmin(admin.ModelAdmin):
     list_display = ["name", "company", "venue", "performance_date", "owner", "created_at"]
     list_filter = ["owner"]
-    inlines = [CueInline]
+    inlines = [MembershipInline, CueInline]
 
 
 @admin.register(Cue)

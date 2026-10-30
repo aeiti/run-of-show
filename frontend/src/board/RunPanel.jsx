@@ -6,7 +6,7 @@ const runName = (r) =>
   [r.label, r.kind, new Date(r.created_at).toLocaleDateString(), r.ended_at && 'ended'].filter(Boolean).join(' · ')
 
 /** Pick, start or end a run, and show its log. */
-export default function RunPanel({ runs, run, onSelect, onCreate, onEnd, onExport }) {
+export default function RunPanel({ runs, run, canOperate, onSelect, onCreate, onEnd, onExport }) {
   const [creating, setCreating] = useState(false)
   const [draft, setDraft] = useState({ label: '', kind: 'rehearsal' })
   const [confirmEnd, setConfirmEnd] = useState(false)
@@ -47,9 +47,11 @@ export default function RunPanel({ runs, run, onSelect, onCreate, onEnd, onExpor
             </option>
           ))}
         </select>
-        <button className="ghost" onClick={() => setCreating(!creating)}>
-          {creating ? 'Cancel' : 'New'}
-        </button>
+        {canOperate && (
+          <button className="ghost" onClick={() => setCreating(!creating)}>
+            {creating ? 'Cancel' : 'New'}
+          </button>
+        )}
       </div>
 
       {creating && (
@@ -72,9 +74,12 @@ export default function RunPanel({ runs, run, onSelect, onCreate, onEnd, onExpor
       )}
 
       {run?.ended_at ? (
-        <p className="muted ended">Ended {new Date(run.ended_at).toLocaleString()}. Start a new run to keep going.</p>
+        <p className="muted ended">
+          Ended {new Date(run.ended_at).toLocaleString()}.{canOperate && ' Start a new run to keep going.'}
+        </p>
       ) : (
-        run && (
+        run &&
+        canOperate && (
           <button className={`ghost small ${confirmEnd ? 'danger' : ''}`} onClick={end}>
             {confirmEnd ? 'Confirm: end this run' : 'End run'}
           </button>
