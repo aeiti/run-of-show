@@ -6,6 +6,7 @@ import { HoldClock } from '../board/Transport'
 import { sortCues } from '../board/state'
 import { formatTime } from '../board/cueTime'
 import { followSlice, liveRun } from './followView'
+import Unavailable from '../Unavailable'
 
 /**
  * A view-only board for ASMs and operators on tablets: the cue that is
@@ -14,13 +15,15 @@ import { followSlice, liveRun } from './followView'
  * moves to a new run when one starts. Anyone who can see the production can
  * open it; nothing here changes the show.
  */
-export default function Follow({ productionId, onGone, onSignedOut }) {
+export default function Follow({ productionId, me, onSignedOut }) {
   const [production, setProduction] = useState(null)
   const [cues, setCues] = useState(null)
   const [runs, setRuns] = useState(null)
   const [run, setRun] = useState(null)
   const [liveStatus, setLiveStatus] = useState('connecting')
   const [error, setError] = useState('')
+  // No such production, or no access to it (the server doesn't say which).
+  const [gone, setGone] = useState(false)
 
   const followed = useMemo(() => (runs ? liveRun(runs) : null), [runs])
   const followedId = followed?.id ?? null
@@ -37,7 +40,7 @@ export default function Follow({ productionId, onGone, onSignedOut }) {
   }
 
   useEffect(() => {
-    loadAll().catch((e) => setError(e.message))
+    loadAll().catch((e) => (e.status === 404 ? setGone(true) : setError(e.message)))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productionId])
 
@@ -81,7 +84,7 @@ export default function Follow({ productionId, onGone, onSignedOut }) {
           setProduction(await api.production(productionId))
           break
         case 'production.deleted':
-          onGone()
+          setGone(true)
           break
         case 'resync':
           await loadAll()
@@ -100,7 +103,7 @@ export default function Follow({ productionId, onGone, onSignedOut }) {
         onMessage: (message) => onLive.current(message),
         onResync: () => onLive.current({ type: 'resync' }),
         onStatus: setLiveStatus,
-        onGone,
+        onGone: () => setGone(true),
         onSignedOut,
       }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -110,6 +113,7 @@ export default function Follow({ productionId, onGone, onSignedOut }) {
   useWakeLock()
 
   const loading = !production || !cues || !runs
+  if (gone) return <Unavailable me={me} />
   return (
     <main className={`follow${hold ? ' is-held' : ''}`}>
       <header className="follow-head">
