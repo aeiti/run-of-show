@@ -163,3 +163,34 @@ class CueEvent(models.Model):
 
     def __str__(self):
         return f"{self.run.label}: {self.action} Q{format_number(self.cue_number)} @ {self.fired_at:%H:%M:%S}"
+
+
+class CueNote(models.Model):
+    """A note about a cue in one run ("Q12 late"), apart from the cue's standing notes.
+
+    Unlike the event log these can be edited and deleted: they are working
+    notes, often written up after the run. The cue's number and label are
+    copied when the note is made, as on events, so the note still says which
+    cue it was about if the cue is renumbered or deleted.
+    """
+
+    run = models.ForeignKey(Run, on_delete=models.CASCADE, related_name="cue_notes")
+    cue = models.ForeignKey(Cue, on_delete=models.SET_NULL, null=True, blank=True, related_name="run_notes")
+    cue_number = models.DecimalField(max_digits=10, decimal_places=4, null=True, blank=True)
+    cue_label = models.CharField(max_length=200, blank=True)
+    text = models.TextField(max_length=2000)
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+
+    @property
+    def production(self):
+        return self.run.production
+
+    def __str__(self):
+        return f"{self.run.label}: Q{format_number(self.cue_number)} {self.text[:40]}"

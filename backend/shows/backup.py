@@ -3,16 +3,16 @@ run logs, and the import that turns such a file back into a new production.
 
 Duplicating a production is an export without runs, imported straight back.
 
-Timestamps are kept as they were: a run's ``created_at`` and an event's
-``fired_at`` are ``auto_now_add`` fields, so they are written after the
-insert. That is the one time event rows are touched after they are created,
+Timestamps are kept as they were: a run's ``created_at``, an event's
+``fired_at`` and a cue note's times are set automatically on insert, so they
+are written after it. That is the one time event rows are touched after they are created,
 and only to restore the original history.
 """
 
 from django.db import transaction
 from django.utils import timezone
 
-from .models import Cue, CueEvent, Production, Run
+from .models import Cue, CueEvent, CueNote, Production, Run
 from .serializers import (
     BACKUP_FORMAT,
     BACKUP_VERSION,
@@ -31,7 +31,7 @@ def export_production(production, runs=True):
         "cues": BackupCueSerializer(production.cues.all(), many=True).data,
     }
     if runs:
-        history = production.runs.order_by("created_at", "id").prefetch_related("events__cue")
+        history = production.runs.order_by("created_at", "id").prefetch_related("events__cue", "cue_notes__cue")
         data["runs"] = BackupRunSerializer(history, many=True).data
     return data
 
@@ -54,6 +54,7 @@ def import_production(owner, data, **details):
         run_data = dict(run_data)
         created_at = run_data.pop("created_at")
         events = run_data.pop("events", [])
+        notes = run_data.pop("cue_notes", [])
         run = Run.objects.create(production=production, **run_data)
         Run.objects.filter(pk=run.pk).update(created_at=created_at)
 
@@ -67,6 +68,14 @@ def import_production(owner, data, **details):
         for row, fired_at in zip(rows, fired):
             row.fired_at = fired_at
         CueEvent.objects.bulk_update(rows, ["fired_at"])
+
+        for note in notes:
+            note = dict(note)
+            linked = (note.pop("cue", None) or {}).get("number")
+            created_at = note.pop("created_at")
+            updated_at = note.pop("updated_at", None) or created_at
+            row = CueNote.objects.create(run=run, cue_id=cue_ids.get(linked), **note)
+            CueNote.objects.filter(pk=row.pk).update(created_at=created_at, updated_at=updated_at)
 
     return production
 

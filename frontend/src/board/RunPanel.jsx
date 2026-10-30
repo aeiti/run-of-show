@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { CueNoteForm, CueNoteItem } from './CueNotes'
 import { formatClock } from './playbackSteps'
 
 const KINDS = ['rehearsal', 'tech', 'preview', 'performance', 'other']
@@ -16,8 +17,31 @@ function logText(events, i) {
   return e.action === 'reset' ? '' : `Q${e.cue_number} ${e.cue_label}`
 }
 
-/** Pick, start or end a run, and show its log. */
-export default function RunPanel({ runs, run, canOperate, onSelect, onCreate, onEnd, onExport }) {
+/** Events and cue notes in one list, in time order. */
+function logItems(events, notes) {
+  const items = [
+    ...events.map((e, i) => ({ key: `e${e.id}`, at: e.fired_at, i })),
+    ...notes.map((n) => ({ key: `n${n.id}`, at: n.created_at, note: n })),
+  ]
+  return items.sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
+}
+
+/** Pick, start or end a run, write cue notes, and show its log. */
+export default function RunPanel({
+  runs,
+  run,
+  cues,
+  canOperate,
+  noteCueNumber,
+  noteRef,
+  onSelect,
+  onCreate,
+  onEnd,
+  onExport,
+  onAddNote,
+  onEditNote,
+  onDeleteNote,
+}) {
   const [creating, setCreating] = useState(false)
   const [draft, setDraft] = useState({ label: '', kind: 'rehearsal' })
   const [confirmEnd, setConfirmEnd] = useState(false)
@@ -41,6 +65,7 @@ export default function RunPanel({ runs, run, canOperate, onSelect, onCreate, on
   }
 
   const events = run?.events ?? []
+  const notes = run?.cue_notes ?? []
 
   return (
     <section className="run-panel">
@@ -105,15 +130,22 @@ export default function RunPanel({ runs, run, canOperate, onSelect, onCreate, on
           </button>
         )}
       </div>
+      {run && canOperate && (
+        <CueNoteForm cues={cues} defaultNumber={noteCueNumber} disabled={!run} onAdd={onAddNote} inputRef={noteRef} />
+      )}
       <ol className="log">
-        {events.length === 0 && <li className="muted">Nothing fired in this run yet.</li>}
-        {events.map((e, i) => (
-          <li key={e.id}>
-            <time>{new Date(e.fired_at).toLocaleTimeString()}</time>
-            {e.action !== 'go' && <b className="log-action">{e.action.toUpperCase()} </b>}
-            {logText(events, i)}
-          </li>
-        ))}
+        {events.length === 0 && notes.length === 0 && <li className="muted">Nothing fired in this run yet.</li>}
+        {logItems(events, notes).map(({ key, i, note }) =>
+          note ? (
+            <CueNoteItem key={key} note={note} canEdit={canOperate} onEdit={onEditNote} onDelete={onDeleteNote} />
+          ) : (
+            <li key={key}>
+              <time>{new Date(events[i].fired_at).toLocaleTimeString()}</time>
+              {events[i].action !== 'go' && <b className="log-action">{events[i].action.toUpperCase()} </b>}
+              {logText(events, i)}
+            </li>
+          ),
+        )}
       </ol>
     </section>
   )

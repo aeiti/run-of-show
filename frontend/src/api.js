@@ -115,6 +115,10 @@ export const api = {
   reset: (runId) => request(`/runs/${runId}/reset/`, { method: 'POST' }),
   hold: (runId, reason) => request(`/runs/${runId}/hold/`, { method: 'POST', body: { reason } }),
   resume: (runId) => request(`/runs/${runId}/resume/`, { method: 'POST' }),
+  // Notes on cues within a run: data is { cue, text } to add, { text } to edit.
+  addCueNote: (runId, data) => request(`/runs/${runId}/notes/`, { method: 'POST', body: data }),
+  updateCueNote: (noteId, data) => request(`/cue-notes/${noteId}/`, { method: 'PATCH', body: data }),
+  deleteCueNote: (noteId) => request(`/cue-notes/${noteId}/`, { method: 'DELETE' }),
   endRun: (runId) => request(`/runs/${runId}/end/`, { method: 'POST' }),
   // body is FormData with file or text, mode, list and dry_run.
   importCues: (id, form) => request(`/productions/${id}/cues/import/`, { method: 'POST', body: form }),

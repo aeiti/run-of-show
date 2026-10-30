@@ -6,7 +6,7 @@ from rest_framework import serializers
 from accounts.models import display_name
 
 from .access import role_for
-from .models import FOLLOW_VALIDATOR, Cue, CueEvent, Membership, Production, Run, format_number
+from .models import FOLLOW_VALIDATOR, Cue, CueEvent, CueNote, Membership, Production, Run, format_number
 from .services import run_state
 
 
@@ -171,12 +171,41 @@ class RunStateSerializer(serializers.Serializer):
     hold = HoldStateSerializer(allow_null=True)
 
 
+class CueNoteSerializer(serializers.ModelSerializer):
+    """A cue note in a run. The cue is set when the note is made; after that only the text changes."""
+
+    cue_number = CueNumberField(read_only=True)
+    author = serializers.SerializerMethodField()
+
+    class Meta:
+        model = CueNote
+        fields = ["id", "run", "cue", "cue_number", "cue_label", "text", "author", "created_at", "updated_at"]
+        read_only_fields = ["id", "run", "cue_number", "cue_label", "created_at", "updated_at"]
+        extra_kwargs = {"cue": {"required": True, "allow_null": False}}
+
+    def get_author(self, note):
+        return (display_name(note.author) or note.author.get_username()) if note.author else ""
+
+    def validate_cue(self, cue):
+        if self.instance is not None and cue != self.instance.cue:
+            raise serializers.ValidationError("A note's cue can't be changed. Delete it and add a new one.")
+        run = self.context.get("run") or self.instance.run
+        if cue.production_id != run.production_id:
+            raise serializers.ValidationError("That cue is not in this production.")
+        return cue
+
+    def create(self, validated_data):
+        cue = validated_data["cue"]
+        return super().create({**validated_data, "cue_number": cue.number, "cue_label": cue.label})
+
+
 class RunDetailSerializer(RunSerializer):
     events = CueEventSerializer(many=True, read_only=True)
+    cue_notes = CueNoteSerializer(many=True, read_only=True)
     state = serializers.SerializerMethodField()
 
     class Meta(RunSerializer.Meta):
-        fields = RunSerializer.Meta.fields + ["events", "state"]
+        fields = RunSerializer.Meta.fields + ["events", "cue_notes", "state"]
 
     def get_state(self, run):
         return RunStateSerializer(run_state(run)).data
@@ -232,13 +261,27 @@ class BackupEventSerializer(serializers.ModelSerializer):
         fields = ["action", "cue", "cue_number", "cue_label", "fired_at", "note"]
 
 
+class BackupCueNoteSerializer(serializers.ModelSerializer):
+    # ``cue`` and ``cue_number`` as on events. The author isn't kept: the
+    # file may be imported where that user doesn't exist.
+    cue = CueNumberField(source="cue.number", allow_null=True, required=False)
+    cue_number = CueNumberField(allow_null=True, required=False)
+    created_at = serializers.DateTimeField()
+    updated_at = serializers.DateTimeField(required=False)
+
+    class Meta:
+        model = CueNote
+        fields = ["cue", "cue_number", "cue_label", "text", "created_at", "updated_at"]
+
+
 class BackupRunSerializer(serializers.ModelSerializer):
     created_at = serializers.DateTimeField()
     events = BackupEventSerializer(many=True, required=False)
+    cue_notes = BackupCueNoteSerializer(many=True, required=False)
 
     class Meta:
         model = Run
-        fields = ["label", "kind", "created_at", "ended_at", "notes", "events"]
+        fields = ["label", "kind", "created_at", "ended_at", "notes", "events", "cue_notes"]
 
 
 class BackupSerializer(serializers.Serializer):
@@ -274,12 +317,13 @@ class BackupSerializer(serializers.Serializer):
     def validate(self, data):
         numbers = {c["number"] for c in data.get("cues", [])}
         for run in data.get("runs", []):
-            for event in run.get("events", []):
-                linked = (event.get("cue") or {}).get("number")
-                if linked is not None and linked not in numbers:
-                    raise serializers.ValidationError(
-                        {"runs": f"{run['label']} links an event to cue {format_number(linked)}, which isn't in the file."}
-                    )
+            for kind, rows in (("an event", run.get("events", [])), ("a note", run.get("cue_notes", []))):
+                for row in rows:
+                    linked = (row.get("cue") or {}).get("number")
+                    if linked is not None and linked not in numbers:
+                        raise serializers.ValidationError(
+                            {"runs": f"{run['label']} links {kind} to cue {format_number(linked)}, which isn't in the file."}
+                        )
         return data
 
 

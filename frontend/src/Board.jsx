@@ -45,12 +45,15 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
   const fillRef = useRef(null)
   const trackRef = useRef(null)
   const gotoRef = useRef(null)
+  const noteRef = useRef(null)
 
   const cueList = useMemo(() => cues ?? [], [cues])
   const loaded = Boolean(production && cues && run)
   const live = mode === 'live'
   const ended = Boolean(run?.ended_at)
   const hold = run?.state.hold ?? null
+  // This run's cue notes, shown on each cue's card.
+  const notesByCue = useMemo(() => Object.groupBy(run?.cue_notes ?? [], (n) => n.cue), [run])
   // What this user's role on the production allows; the server checks it too.
   const canOperate = can(production?.role, 'operate')
   const canEdit = can(production?.role, 'edit')
@@ -227,6 +230,29 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
     }
   }
 
+  // Cue notes: each resolves to whether it worked, so the form knows to clear.
+  async function noteAction(fn, update) {
+    try {
+      const result = await fn()
+      setRun((prev) => ({ ...prev, cue_notes: update(prev.cue_notes, result) }))
+      return true
+    } catch (err) {
+      setError(err.message)
+      return false
+    }
+  }
+  const addNote = (cue, text) => noteAction(() => api.addCueNote(run.id, { cue, text }), (notes, n) => [...notes, n])
+  const editNote = (id, text) =>
+    noteAction(
+      () => api.updateCueNote(id, { text }),
+      (notes, n) => notes.map((x) => (x.id === id ? n : x)),
+    )
+  const deleteNote = (id) =>
+    noteAction(
+      () => api.deleteCueNote(id),
+      (notes) => notes.filter((x) => x.id !== id),
+    )
+
   // Any cue edit can change which cue is next, so refresh the run state after it.
   async function afterCueChange(nextCues) {
     setCues(sortCues(nextCues))
@@ -258,6 +284,9 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
         e.preventDefault()
         gotoRef.current?.focus()
         gotoRef.current?.select()
+      } else if (e.key === 'n') {
+        e.preventDefault()
+        noteRef.current?.focus()
       } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
         e.preventDefault()
         if (!ended) setLoadedCue(stepLoad(cueList, run?.state, loadedCue, e.key === 'ArrowDown' ? 1 : -1))
@@ -344,6 +373,11 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
                   <span className="cue-label">
                     {c.label}
                     {c.notes && <small className="cue-notes">{c.notes}</small>}
+                    {notesByCue[c.id]?.map((n) => (
+                      <small key={n.id} className="run-note">
+                        ✎ {n.text}
+                      </small>
+                    ))}
                   </span>
                   <CueTime cue={c} />
                   <span className="cue-page">{c.page ? `p.${c.page}` : ''}</span>
@@ -417,7 +451,13 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
           <RunPanel
             runs={runs}
             run={run}
+            cues={cueList}
             canOperate={canOperate}
+            noteCueNumber={cueList.find((c) => c.id === loadedCue)?.number ?? run?.state.active_number ?? ''}
+            noteRef={noteRef}
+            onAddNote={addNote}
+            onEditNote={editNote}
+            onDeleteNote={deleteNote}
             onSelect={onSelectRun}
             onCreate={createRun}
             onEnd={endRun}
