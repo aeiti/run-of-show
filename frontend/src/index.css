@@ -240,6 +240,13 @@ select { font: inherit; color: inherit; background: #181b21; border: 1px solid v
 .import-table tr.reject td { color: var(--err); }
 .import-table tr.delete td { color: var(--stby); }
 
+/* Production logo */
+.production-title { display: flex; align-items: center; gap: 0.6rem; min-width: 0; }
+.production-logo { height: 1.8em; max-width: 6em; object-fit: contain; flex: none; border-radius: 3px; }
+.logo-field { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+.logo-field label { flex: 1; min-width: 200px; }
+.logo-field .production-logo { height: 2.5rem; }
+
 /* Files dialog and script viewer */
 .files { width: min(620px, 100%); }
 .files-empty { margin: 1rem 0; }

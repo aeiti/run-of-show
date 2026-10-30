@@ -1,4 +1,5 @@
 import json
+import os
 
 from django.db import transaction
 from django.db.models import Max
@@ -19,6 +20,7 @@ from .serializers import (
     FileUploadSerializer,
     HoldSerializer,
     InviteSerializer,
+    LogoUploadSerializer,
     MembershipSerializer,
     OptionalCueTargetSerializer,
     ProductionFileSerializer,
@@ -44,6 +46,7 @@ class ProductionViewSet(viewsets.ModelViewSet):
         "runs": "operate",
         "members": "share",
         "files": "edit",
+        "logo": "edit",
         # The copy belongs to whoever makes it, and holds nothing they can't
         # already read and export, so any role may duplicate.
         "duplicate": "view",
@@ -161,6 +164,29 @@ class ProductionViewSet(viewsets.ModelViewSet):
                 uploaded_by=request.user,
             )
         return Response(ProductionFileSerializer(created).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get", "put", "delete"])
+    def logo(self, request, pk=None):
+        """GET the image; PUT a new one as ``file`` (replacing any), or DELETE it. Changes return the production."""
+        production = self.get_object()
+        if request.method == "GET":
+            if not production.logo:
+                return Response({"detail": "This production has no logo."}, status=status.HTTP_404_NOT_FOUND)
+            name = f"{slugify(production.name) or 'production'}-logo{os.path.splitext(production.logo.name)[1]}"
+            return stored_file_response(production.logo, name, uploads.content_type_for(production.logo.name))
+
+        if request.method == "PUT":
+            upload = LogoUploadSerializer(data=request.data)
+            upload.is_valid(raise_exception=True)
+        with transaction.atomic():
+            # The old image is deleted once the change commits.
+            uploads.delete_stored(production.logo)
+            if request.method == "PUT":
+                production.logo.save(f"logo.{upload.validated_data['ext']}", upload.validated_data["file"], save=False)
+            else:
+                production.logo = ""
+            production.save(update_fields=["logo"])
+        return Response(ProductionSerializer(production, context={"request": request}).data)
 
     @action(detail=True, methods=["get", "post"])
     def members(self, request, pk=None):
