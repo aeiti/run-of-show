@@ -10,9 +10,8 @@ Two input formats:
   cues live in the TARGETS section as rows whose ``TARGET_TYPE_AS_TEXT`` is
   ``Cue``. Cue numbers repeat across cue lists, so one list is imported at a
   time. Part rows (``PART_NUMBER`` set) are skipped: they belong to a cue
-  that has its own row. Built against real Eos exports; fields the samples
-  didn't exercise (labels, notes, parts, point cues) are covered by
-  synthetic tests only.
+  that has its own row. Checked against real Eos exports from two shows
+  (one with 10 lists, point cues, parts, labels, scenes and notes).
 """
 
 import csv

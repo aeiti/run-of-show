@@ -115,7 +115,9 @@ export default function Board({ productionId, runId, onBack, onSelectRun }) {
       cardRefs.current.length = cueList.length
       applyStates(states, playIdx, 0)
       gsap.from('.track', { scaleX: 0, transformOrigin: 'left center', duration: 0.6, ease: 'power3.out' })
-      gsap.from('.cue-list > li', { y: 28, autoAlpha: 0, duration: 0.5, ease: 'power3.out', stagger: 0.05 })
+      // A real show has hundreds of cues: keep the whole entrance under a second.
+      const each = Math.min(0.05, 1 / cueList.length)
+      gsap.from('.cue-list > li', { y: 28, autoAlpha: 0, duration: 0.5, ease: 'power3.out', stagger: each })
     },
     { dependencies: [loaded, live], scope },
   )
