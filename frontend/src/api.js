@@ -1,4 +1,14 @@
-const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:5600/api'
+/**
+ * The API is on port 5600 of whichever host served the board, so a tablet
+ * that opened http://<this machine>:3200 calls the API on that machine, not
+ * its own localhost. VITE_API_URL overrides it.
+ */
+export function defaultApiUrl(location = globalThis.location) {
+  const protocol = location?.protocol === 'https:' ? 'https:' : 'http:'
+  return `${protocol}//${location?.hostname || 'localhost'}:5600/api`
+}
+
+const BASE = import.meta.env.VITE_API_URL || defaultApiUrl()
 const TOKEN_KEY = 'ros-token'
 
 export const getToken = () => localStorage.getItem(TOKEN_KEY)

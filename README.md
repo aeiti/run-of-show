@@ -22,6 +22,14 @@ docker compose up -d --build
 
 This runs the database, the API at http://localhost:5600 and the board at http://localhost:3200. The source folders are mounted into the containers, so edits reload as they do on the host. The API applies migrations each time it starts, so after pulling, `docker compose up -d --build` (or `docker compose restart backend`) is enough; rebuild when `requirements.txt` or `package.json` change. Run management commands inside the container, e.g. `docker compose exec backend python manage.py seed_demo`. Uploaded files are kept in the `media` volume.
 
+**From other machines** (a tablet at the tech table, say): set `LAN_HOSTS` to the names or addresses this machine has on the network, in a `.env` file next to `docker-compose.yml` or in the shell, and restart:
+
+```bash
+LAN_HOSTS=adams-macbook-pro.local,192.168.1.241 docker compose up -d
+```
+
+Then open `http://<one of those>:3200` on the other machine. The board calls the API on port 5600 of whichever host it was loaded from, and `LAN_HOSTS` is what lets Django, the live-update sockets and Vite accept those names. Without it only this machine can use the app. macOS may ask whether to accept incoming connections the first time. This is for a trusted network: it is still the development setup, with `DEBUG` on. The database is only published on `127.0.0.1`.
+
 **Or on the host**
 
 You need Docker, Python 3.12, and Node 20.19+ or 22.12+.
@@ -60,7 +68,7 @@ npm install
 npm run dev
 ```
 
-The login form is prefilled with the demo account. Set `VITE_API_URL` (see `frontend/.env.example`) if the API is not on `localhost:5600`.
+The login form is prefilled with the demo account. The board calls the API on port 5600 of the host it was loaded from; set `VITE_API_URL` (see `frontend/.env.example`) if the API is somewhere else. To use a host-run board from other machines, set `LAN_HOSTS` in `backend/.env` and in the shell that runs `npm run dev`, and run Vite with `--host`.
 
 **Tests**
 
