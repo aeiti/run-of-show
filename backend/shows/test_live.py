@@ -9,7 +9,7 @@ from config.asgi import application
 from shows.models import Membership
 from shows.tests import client_for
 
-ORIGIN = (b"origin", b"http://localhost:5173")
+ORIGIN = (b"origin", b"http://localhost:3200")
 pytestmark = [pytest.mark.asyncio, pytest.mark.django_db(transaction=True)]
 
 
