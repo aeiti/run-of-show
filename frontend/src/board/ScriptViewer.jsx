@@ -3,10 +3,10 @@ import { useBlobUrl } from '../useBlobUrl'
 
 /**
  * The production's script beside the cue list, in the browser's own PDF
- * viewer. ``page`` is the active cue's script page; on each GO the viewer is
- * sent there with the URL's #page= fragment, which the built-in viewers in
- * Chrome, Firefox and Safari understand. Only the fragment changes, so the
- * file isn't fetched again.
+ * viewer. ``page`` is the active cue's script page, passed as the URL's
+ * #page= fragment. Chrome's viewer only reads the fragment when it loads, so
+ * the frame is remounted (keyed by page) when the page changes; the blob is
+ * already in memory, so nothing is fetched again.
  */
 export default function ScriptViewer({ file, page }) {
   const { url, error } = useBlobUrl(() => api.fileBlob(file.id), file.id)
@@ -20,7 +20,7 @@ export default function ScriptViewer({ file, page }) {
       {error ? (
         <p className="error">{error}</p>
       ) : url ? (
-        <iframe title={`Script: ${file.name}`} src={page ? `${url}#page=${page}` : url} />
+        <iframe key={page ?? 0} title={`Script: ${file.name}`} src={page ? `${url}#page=${page}` : url} />
       ) : (
         <p className="muted">Loading the script…</p>
       )}
