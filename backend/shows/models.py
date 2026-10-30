@@ -1,6 +1,13 @@
+import uuid
+
 from django.conf import settings
 from django.core.validators import RegexValidator
 from django.db import models
+from django.db.models.signals import post_delete
+from django.dispatch import receiver
+from django.utils.text import get_valid_filename
+
+from .uploads import delete_stored
 
 
 class Production(models.Model):
@@ -194,3 +201,51 @@ class CueNote(models.Model):
 
     def __str__(self):
         return f"{self.run.label}: Q{format_number(self.cue_number)} {self.text[:40]}"
+
+
+def production_file_path(instance, filename):
+    # A fresh folder per upload, so versions with the same name never collide
+    # and a stored path says nothing about the next one.
+    return f"productions/{instance.production_id}/files/{uuid.uuid4().hex}/{get_valid_filename(filename)}"
+
+
+class ProductionFile(models.Model):
+    """A script, showfile or other attachment on a production.
+
+    Uploading a file with the same kind and name as an earlier one adds a new
+    version and keeps the old ones. The stored file is deleted with the row,
+    including when its production is deleted.
+    """
+
+    class Kind(models.TextChoices):
+        # Scripts are PDFs; the board shows the latest one at the active cue's page.
+        SCRIPT = "script"
+        SHOWFILE = "showfile"
+        OTHER = "other"
+
+    production = models.ForeignKey(Production, on_delete=models.CASCADE, related_name="files")
+    kind = models.CharField(max_length=20, choices=Kind.choices, default=Kind.OTHER)
+    # The name it was uploaded with; versions are grouped by kind and name.
+    name = models.CharField(max_length=255)
+    version = models.PositiveIntegerField()
+    file = models.FileField(upload_to=production_file_path, max_length=500)
+    size = models.PositiveBigIntegerField()
+    content_type = models.CharField(max_length=100)
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    uploaded_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["kind", "name", "-version"]
+        constraints = [
+            models.UniqueConstraint(fields=["production", "kind", "name", "version"], name="unique_file_version"),
+        ]
+
+    def __str__(self):
+        return f"{self.production}: {self.name} v{self.version}"
+
+
+@receiver(post_delete, sender=ProductionFile)
+def delete_production_file(sender, instance, **kwargs):
+    delete_stored(instance.file)

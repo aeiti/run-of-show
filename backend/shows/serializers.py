@@ -1,3 +1,6 @@
+import os
+
+from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
@@ -6,7 +9,18 @@ from rest_framework import serializers
 from accounts.models import display_name
 
 from .access import role_for
-from .models import FOLLOW_VALIDATOR, Cue, CueEvent, CueNote, Membership, Production, Run, format_number
+from . import uploads
+from .models import (
+    FOLLOW_VALIDATOR,
+    Cue,
+    CueEvent,
+    CueNote,
+    Membership,
+    Production,
+    ProductionFile,
+    Run,
+    format_number,
+)
 from .services import run_state
 
 
@@ -209,6 +223,40 @@ class RunDetailSerializer(RunSerializer):
 
     def get_state(self, run):
         return RunStateSerializer(run_state(run)).data
+
+
+class ProductionFileSerializer(serializers.ModelSerializer):
+    uploaded_by = serializers.SerializerMethodField()
+
+    class Meta:
+        model = ProductionFile
+        fields = ["id", "production", "kind", "name", "version", "size", "content_type", "uploaded_by", "uploaded_at"]
+        read_only_fields = fields
+
+    def get_uploaded_by(self, f):
+        return (display_name(f.uploaded_by) or f.uploaded_by.get_username()) if f.uploaded_by else ""
+
+
+class FileUploadSerializer(serializers.Serializer):
+    """A new file, or a new version of one: same kind and name as an earlier upload."""
+
+    file = serializers.FileField(max_length=255)
+    kind = serializers.ChoiceField(ProductionFile.Kind.choices, default=ProductionFile.Kind.OTHER)
+
+    def validate(self, data):
+        upload = data["file"]
+        limit = settings.PRODUCTION_FILE_MAX_SIZE
+        if upload.size > limit:
+            raise serializers.ValidationError({"file": f"Files can be up to {megabytes(limit)} MB."})
+        if data["kind"] == ProductionFile.Kind.SCRIPT and not uploads.is_pdf(uploads.read_head(upload)):
+            raise serializers.ValidationError({"file": "A script must be a PDF."})
+        # Browsers send a bare name, but don't keep a path if one is sent.
+        data["name"] = os.path.basename(upload.name).strip() or "file"
+        return data
+
+
+def megabytes(size):
+    return format(size / (1024 * 1024), "g")
 
 
 class CueTargetSerializer(serializers.Serializer):

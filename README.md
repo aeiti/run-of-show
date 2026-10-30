@@ -34,6 +34,8 @@ cp .env.example .env
 
 `seed_demo` creates a local demo user (`demo` / `curtain-up`, an app admin) and a sample production with ten cues. It is safe to run more than once. Anyone can also create their own account from the sign-in page. For the Django admin, create a superuser with `manage.py createsuperuser`.
 
+Uploaded scripts and showfiles are stored in `backend/media/` (gitignored), or in S3 or an S3-compatible service when `AWS_STORAGE_BUCKET_NAME` is set (see "Files" below and `backend/.env.example`).
+
 Password reset emails are printed to the `runserver` console in development; the link in them opens the frontend at `FRONTEND_URL`. To send real email, set `EMAIL_BACKEND` and the `EMAIL_*` settings (see `backend/.env.example`).
 
 **Frontend** (http://localhost:5173)
@@ -62,13 +64,14 @@ CI (`.github/workflows/ci.yml`) runs on every pull request and push to `main`. T
 
 ## Backend
 
-Six models in `backend/shows/models.py`, all registered in the Django admin:
+Seven models in `backend/shows/models.py`, all registered in the Django admin:
 
 - `Production`: owner, name, company, venue, performance date, notes
 - `Membership`: someone else on a production, as stage manager, operator or viewer
 - `Cue`: number (a decimal, so `12.5` sorts between `12` and `13`), label, script page, notes, scene, and timing as on Eos: up time, down time, Eos's total duration, and follow or hang (`F2`, `H3`). Cues are always ordered by number.
 - `Run`: one rehearsal or performance of a production (label such as "Preview 1", kind, start and end)
 - `CueNote`: a note about a cue in one run ("Q12 late, tech 2"), apart from the cue's standing notes. It keeps a copy of the cue's number and label, and unlike the log it can be edited and deleted
+- `ProductionFile`: one version of a script (a PDF), showfile (such as Eos's `.esf`) or other file on a production: kind, the name it was uploaded with, version, size, who uploaded it and when
 - `CueEvent`: one operator action in a run (GO, BACK, GOTO, RESET, HOLD or RESUME), with the cue it made active (or, for a hold or resume, the cue that was active) and a timestamp
 
 The schema is in the committed migrations in `backend/shows/migrations/`. `0003` is a data migration that moved the original free-text run labels into `Run` rows.
@@ -101,10 +104,13 @@ The schema is in the committed migrations in `backend/shows/migrations/`. `0003`
 | `POST` | `/api/productions/{id}/cues/import/` | Import cues from CSV (dry run unless `dry_run=false`) |
 | `GET` | `/api/productions/{id}/cues/export/` | Download the cue list as CSV |
 | `GET` | `/api/runs/{id}/export/` | Download a run log as CSV |
+| `GET` `POST` | `/api/productions/{id}/files/` | List every version of every file, or upload one (`file`, and `kind`: `script`, `showfile` or `other`) |
+| `GET` `DELETE` | `/api/files/{id}/` | One version of a file: its details, or delete it |
+| `GET` | `/api/files/{id}/download/` | Download one version |
 
 Every endpoint except sign-in, sign-up and password reset requires authentication (DRF token or session). Each user has one token: changing or resetting the password replaces it, which signs out every other device. Sign-in, sign-up and the password endpoints are rate limited (`AUTH_THROTTLE_RATE`, default 20 a minute per client). Querysets are filtered to productions the requesting user owns or is a member of, so anyone else's production, cue or run returns 404. Within a production, `backend/shows/access.py` decides what each role may do, and a member without the right role gets 403:
 
-| Role | View and export | Run the show (GO, BACK, GOTO, RESET, HOLD, runs) | Edit details and cues | Manage people | Delete |
+| Role | View, export and download files | Run the show (GO, BACK, GOTO, RESET, HOLD, runs) | Edit details, cues and files | Manage people | Delete |
 | --- | --- | --- | --- | --- | --- |
 | Owner | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Stage manager | ✓ | ✓ | ✓ | ✓ | |
@@ -117,9 +123,11 @@ Each viewset lists the capability every write action needs; an action that isn't
 
 **About "append-only":** this is enforced in the application layer, not the database. `CueEvent.save()` refuses to update an existing row, `CueEvent.delete()` raises, the API has no update or delete route for events, and the admin is read-only for them. The database does not block `UPDATE` or `DELETE`, and deleting a production or run cascades through its events. Each event keeps a copy of the cue's number and label, so editing or deleting a cue later does not change the log.
 
+**Files** are stored through Django's default storage: the filesystem under `MEDIA_ROOT` (default `backend/media/`) in development, or S3 when `AWS_STORAGE_BUCKET_NAME` is set (with `AWS_S3_ENDPOINT_URL` for an S3-compatible service such as MinIO or R2, and optionally `AWS_S3_REGION_NAME`, `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`), through `django-storages`. Nothing is published at a media URL, and S3 objects are private: a production's files are private like the rest of it, so they are only served by `/api/files/{id}/download/`, which checks the user's role, always as an attachment so an uploaded HTML or SVG file can't run as a page on the API's origin. Uploads are limited to `PRODUCTION_FILE_MAX_MB` (default 50 MB), and a script must be a PDF. Uploading a file with the same kind and name as an earlier one adds a version and keeps the others; each version can be downloaded or deleted on its own. Deleting a file, or the production, deletes the stored files too, once the database change has committed. Files are not part of the production's JSON backup, which would grow by the size of every script and showfile.
+
 **CSV import** (`backend/shows/csv_io.py`) reads two formats. A simple CSV needs a header row with a `number` column, and may have `label`, `page`, `scene`, `notes`, `time`, `down_time`, `duration` and `follow` (times in seconds or `m:ss`); that is also what export writes, so an export can be edited in a spreadsheet and brought back. An **ETC Eos CSV export** (cues only, or a whole show file) is recognised by its `START_…` sections: cues come from the TARGETS section, one cue list at a time since numbers repeat across lists, part rows are skipped, and label, cue notes, scene text, time, down time, duration and follow are kept. Eos's duration is its own total for the cue, counting delays, discrete times and parts; it is what the board times the cue by, and it is cleared when a cue's time is edited here (in the app or by an import without a duration), since it can't be recomputed without those details. Every import is planned first and shown as a dry run (create, update, unchanged, delete, rejected with a reason), then planned again against the current cue list when it's applied. **Merge** adds and updates but never blanks a field (Eos leaves most labels empty); **replace** makes the file the whole cue list. The Eos reader has been checked against real exports from two shows, the larger a full show file with 10 cue lists, 401 cues in the main list, point cues, part cues, labels, scene text and cue notes; the tests use synthetic fixtures with the same shape.
 
-The tests in `backend/shows/tests.py` cover: actions add events without changing earlier ones; unauthenticated writes get 401; one user cannot see or change another user's data; numeric cue ordering; cue editing and duplicate numbers; GO, BACK, GOTO and RESET at both ends of the list; log entries surviving a cue being renamed or deleted; ended runs; and the data migration rejecting bad cue numbers. `backend/shows/test_cue_notes.py` covers cue notes: the cue snapshot and author, editing only the text, deleting, notes outliving their cue, notes after a run ends, validation, roles, strangers, and the backup round trip. `backend/shows/test_holds.py` covers holds: the reason, cue actions refused while held, resuming where the run was, no stacked holds, ending a held run, roles and the CSV log. `backend/shows/test_access.py` covers each role's capabilities, delete being owner-only, the shared productions list, adding people by username or email, changing roles and leaving. `backend/accounts/test_admin.py` covers user management: admin-only access, search, creating users, suspending and reactivating, promoting, the lock-out guards, refusing to delete an owner, and sending reset links. `backend/accounts/tests.py` covers sign-up validation, sign-in and out, profile edits, password change and reset (including single-use links and not revealing which emails have accounts), and rate limiting. `backend/shows/test_csv.py` covers both import formats, merge versus replace, rejected rows, export round trips, run logs surviving a replace import, and owner-only access.
+The tests in `backend/shows/tests.py` cover: actions add events without changing earlier ones; unauthenticated writes get 401; one user cannot see or change another user's data; numeric cue ordering; cue editing and duplicate numbers; GO, BACK, GOTO and RESET at both ends of the list; log entries surviving a cue being renamed or deleted; ended runs; and the data migration rejecting bad cue numbers. `backend/shows/test_cue_notes.py` covers cue notes: the cue snapshot and author, editing only the text, deleting, notes outliving their cue, notes after a run ends, validation, roles, strangers, and the backup round trip. `backend/shows/test_holds.py` covers holds: the reason, cue actions refused while held, resuming where the run was, no stacked holds, ending a held run, roles and the CSV log. `backend/shows/test_files.py` covers files: uploading, listing and downloading, versions, the size limit, scripts having to be PDFs, names with paths, roles (viewers and operators download but can't upload or delete), strangers, and deleting stored files with a version or the whole production. `backend/shows/test_access.py` covers each role's capabilities, delete being owner-only, the shared productions list, adding people by username or email, changing roles and leaving. `backend/accounts/test_admin.py` covers user management: admin-only access, search, creating users, suspending and reactivating, promoting, the lock-out guards, refusing to delete an owner, and sending reset links. `backend/accounts/tests.py` covers sign-up validation, sign-in and out, profile edits, password change and reset (including single-use links and not revealing which emails have accounts), and rate limiting. `backend/shows/test_csv.py` covers both import formats, merge versus replace, rejected rows, export round trips, run logs surviving a replace import, and owner-only access.
 
 ## Frontend
 
@@ -132,6 +140,7 @@ Running a show (Live mode):
 - **BACK** (B or ←) steps to the previous cue. **GOTO** fires the cue whose number is typed in its box (G jumps to the box). **RESET** clears the active cue. All three are recorded in the log alongside GOs.
 - **Notes** (N) adds a note about a cue in this run. It's on the loaded cue, or the active one, unless you type another number. Notes show in the log and on the cue's card, and can be edited or deleted. They can be written after a run has ended.
 - **HOLD…** pauses the run and asks why ("audience medical"). While it's held, GO, BACK, GOTO and RESET are off, and the panel shows the reason, how long it's been held and **RESUME**. The log shows each hold's reason and how long it lasted, and playback shows the hold for as long as it lasted.
+- **Script** shows the production's script beside the cue list, in the browser's own PDF viewer, and turns to the active cue's script page on each GO. It is the script uploaded most recently. **Files** in the header lists the scripts, showfiles and other files with their versions; anyone on the production can download them, and owners and stage managers upload and delete.
 - The **run picker** switches between runs, starts a new one (label and kind), or ends the current one. An ended run is read-only. **Export** downloads the run's log, with seconds from the first event.
 
 The board has two modes, like Live and Blind on a lighting console:
@@ -139,7 +148,7 @@ The board has two modes, like Live and Blind on a lighting console:
 - **Live** shows the cue list as cards, with scene dividers and cue notes, and is where the show is run.
 - **Edit** turns the cue list into inline fields (number, label, time, follow or hang, page, scene, notes). Time takes `5`, `5/3` or `1:30`. A field saves on Enter or when it loses focus, Esc puts it back, delete asks for a second click, and new cues land in number order. **Import CSV…** opens a dialog that previews every change before anything is written; **Export CSV** downloads the list. The production's details are edited from the board header; deleting a production means typing its name. **People** in the header lists who is on the production; owners and stage managers add people by username or email, change their roles and remove them, and anyone can leave.
 
-The Vitest tests cover the board's state helpers (`frontend/src/board/state.js`), cue time parsing and formatting (`frontend/src/board/cueTime.js`), and the step builder that turns a log into playback (`frontend/src/board/playbackSteps.js`).
+The Vitest tests cover the board's state helpers (`frontend/src/board/state.js`), cue time parsing and formatting (`frontend/src/board/cueTime.js`), the step builder that turns a log into playback (`frontend/src/board/playbackSteps.js`), and grouping file versions (`frontend/src/board/files.js`).
 
 The GSAP techniques used on the board:
 

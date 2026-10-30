@@ -1,23 +1,27 @@
 import json
 
-from django.http import HttpResponse, JsonResponse
+from django.db import transaction
+from django.db.models import Max
+from django.http import FileResponse, HttpResponse, JsonResponse
 from django.utils.text import slugify
 from rest_framework import mixins, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from . import backup, csv_io, services
+from . import backup, csv_io, services, uploads
 from .access import ProductionRole, visible_productions
-from .models import Cue, CueNote, Membership, Run
+from .models import Cue, CueNote, Membership, Production, ProductionFile, Run
 from .serializers import (
     CueEventSerializer,
     CueNoteSerializer,
     CueSerializer,
     CueTargetSerializer,
+    FileUploadSerializer,
     HoldSerializer,
     InviteSerializer,
     MembershipSerializer,
     OptionalCueTargetSerializer,
+    ProductionFileSerializer,
     ProductionSerializer,
     RunDetailSerializer,
     RunSerializer,
@@ -39,6 +43,7 @@ class ProductionViewSet(viewsets.ModelViewSet):
         "import_cues": "edit",
         "runs": "operate",
         "members": "share",
+        "files": "edit",
         # The copy belongs to whoever makes it, and holds nothing they can't
         # already read and export, so any role may duplicate.
         "duplicate": "view",
@@ -130,6 +135,32 @@ class ProductionViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save(production=production)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get", "post"])
+    def files(self, request, pk=None):
+        """Every version of every file, newest version first. POST ``file`` and ``kind``; a kind and name already there adds a version."""
+        production = self.get_object()
+        if request.method == "GET":
+            return Response(ProductionFileSerializer(production.files.select_related("uploaded_by__profile"), many=True).data)
+
+        upload = FileUploadSerializer(data=request.data)
+        upload.is_valid(raise_exception=True)
+        kind, name, file = (upload.validated_data[k] for k in ("kind", "name", "file"))
+        with transaction.atomic():
+            # Lock the production so two uploads of one name can't take the same version.
+            Production.objects.select_for_update().filter(pk=production.pk).first()
+            latest = production.files.filter(kind=kind, name=name).aggregate(v=Max("version"))["v"] or 0
+            created = ProductionFile.objects.create(
+                production=production,
+                kind=kind,
+                name=name,
+                version=latest + 1,
+                file=file,
+                size=file.size,
+                content_type="application/pdf" if kind == ProductionFile.Kind.SCRIPT else uploads.content_type_for(name),
+                uploaded_by=request.user,
+            )
+        return Response(ProductionFileSerializer(created).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get", "post"])
     def members(self, request, pk=None):
@@ -275,6 +306,24 @@ class CueNoteViewSet(mixins.UpdateModelMixin, mixins.DestroyModelMixin, viewsets
         )
 
 
+class ProductionFileViewSet(mixins.RetrieveModelMixin, mixins.DestroyModelMixin, viewsets.GenericViewSet):
+    """One version of a file: its details, its contents (``download/``), or delete it. Uploaded through ``/productions/{id}/files/``."""
+
+    serializer_class = ProductionFileSerializer
+    permission_classes = ROLE_PERMISSIONS
+    capabilities = {"destroy": "edit"}
+
+    def get_queryset(self):
+        return ProductionFile.objects.filter(production__in=visible_productions(self.request.user)).select_related(
+            "production", "uploaded_by__profile"
+        )
+
+    @action(detail=True, methods=["get"])
+    def download(self, request, pk=None):
+        f = self.get_object()
+        return stored_file_response(f.file, f.name, f.content_type)
+
+
 class MembershipViewSet(mixins.UpdateModelMixin, mixins.DestroyModelMixin, viewsets.GenericViewSet):
     """Change a member's role, or remove them. Anyone may remove themselves (leave)."""
 
@@ -291,6 +340,12 @@ class MembershipViewSet(mixins.UpdateModelMixin, mixins.DestroyModelMixin, views
         if self.action == "destroy" and membership.user_id == request.user.id:
             return
         super().check_object_permissions(request, membership)
+
+
+def stored_file_response(field_file, filename, content_type):
+    # Always an attachment: these come from users, and must never render as a
+    # page on the API's origin. The app fetches them and makes a blob instead.
+    return FileResponse(field_file.open("rb"), as_attachment=True, filename=filename, content_type=content_type)
 
 
 def csv_response(body, filename):
