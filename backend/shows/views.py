@@ -6,9 +6,9 @@ from rest_framework import mixins, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from . import backup, csv_io, services
+from . import backup, csv_io, live, services
 from .access import ProductionRole, visible_productions
-from .models import Cue, CueNote, Membership, Run
+from .models import Cue, CueNote, Membership, Production, Run
 from .serializers import (
     CueEventSerializer,
     CueNoteSerializer,
@@ -28,7 +28,39 @@ from .serializers import (
 ROLE_PERMISSIONS = [permissions.IsAuthenticated, ProductionRole]
 
 
-class ProductionViewSet(viewsets.ModelViewSet):
+class LiveUpdates:
+    """Tells open boards about each successful write (see ``live.py``).
+
+    ``live_topics`` maps an action to the message type it sends. The
+    production is the one behind the object the action looked up.
+    """
+
+    live_topics = {}
+    live_production_id = None
+
+    def get_object(self):
+        obj = super().get_object()
+        if isinstance(obj, Production):
+            self.live_production_id = obj.pk
+        else:
+            self.live_production_id = obj.run.production_id if isinstance(obj, CueNote) else obj.production_id
+        return obj
+
+    def finalize_response(self, request, response, *args, **kwargs):
+        response = super().finalize_response(request, response, *args, **kwargs)
+        topic = self.live_topics.get(getattr(self, "action", None))
+        changed = request.method not in permissions.SAFE_METHODS and 200 <= response.status_code < 300
+        if topic and changed and self.live_production_id is not None:
+            message = self.live_message(topic, response)
+            if message is not None:
+                live.broadcast(self.live_production_id, message)
+        return response
+
+    def live_message(self, topic, response):
+        return {"type": topic}
+
+
+class ProductionViewSet(LiveUpdates, viewsets.ModelViewSet):
     serializer_class = ProductionSerializer
     permission_classes = ROLE_PERMISSIONS
     capabilities = {
@@ -43,6 +75,21 @@ class ProductionViewSet(viewsets.ModelViewSet):
         # already read and export, so any role may duplicate.
         "duplicate": "view",
     }
+    live_topics = {
+        "update": "production",
+        "partial_update": "production",
+        "destroy": "production.deleted",
+        "cues": "cues",
+        "import_cues": "cues",
+        "runs": "runs",
+        "members": "access",
+    }
+
+    def live_message(self, topic, response):
+        # A dry-run import changes nothing.
+        if self.action == "import_cues" and not response.data.get("applied"):
+            return None
+        return super().live_message(topic, response)
 
     def get_queryset(self):
         # Tenant isolation: a production you're not on is a 404, not a 403.
@@ -151,6 +198,7 @@ class ProductionViewSet(viewsets.ModelViewSet):
 
 
 class CueViewSet(
+    LiveUpdates,
     mixins.RetrieveModelMixin,
     mixins.UpdateModelMixin,
     mixins.DestroyModelMixin,
@@ -159,12 +207,13 @@ class CueViewSet(
     serializer_class = CueSerializer
     permission_classes = ROLE_PERMISSIONS
     capabilities = {"update": "edit", "partial_update": "edit", "destroy": "edit"}
+    live_topics = {"update": "cues", "partial_update": "cues", "destroy": "cues"}
 
     def get_queryset(self):
         return Cue.objects.filter(production__in=visible_productions(self.request.user))
 
 
-class RunViewSet(mixins.RetrieveModelMixin, mixins.UpdateModelMixin, viewsets.GenericViewSet):
+class RunViewSet(LiveUpdates, mixins.RetrieveModelMixin, mixins.UpdateModelMixin, viewsets.GenericViewSet):
     """Runs are history, so there is no delete. Operator actions append events."""
 
     permission_classes = ROLE_PERMISSIONS
@@ -180,6 +229,20 @@ class RunViewSet(mixins.RetrieveModelMixin, mixins.UpdateModelMixin, viewsets.Ge
         "cue_notes": "operate",
         "end": "operate",
     }
+    live_topics = {
+        "update": "runs",
+        "partial_update": "runs",
+        "end": "runs",
+        "cue_notes": "notes",
+        **{name: "run.event" for name in ("go", "back", "goto", "reset", "hold", "resume")},
+    }
+
+    def live_message(self, topic, response):
+        run = int(self.kwargs["pk"])
+        if topic == "run.event":
+            # Everything a board needs to play the action without refetching.
+            return {"type": topic, "run": run, "event": response.data["event"], "state": response.data["state"]}
+        return {"type": topic, "run": run}
 
     def get_queryset(self):
         return Run.objects.filter(production__in=visible_productions(self.request.user)).prefetch_related(
@@ -262,12 +325,21 @@ class RunViewSet(mixins.RetrieveModelMixin, mixins.UpdateModelMixin, viewsets.Ge
         return Response(RunSerializer(services.end(run)).data)
 
 
-class CueNoteViewSet(mixins.UpdateModelMixin, mixins.DestroyModelMixin, viewsets.GenericViewSet):
+class CueNoteViewSet(LiveUpdates, mixins.UpdateModelMixin, mixins.DestroyModelMixin, viewsets.GenericViewSet):
     """Change a cue note's text, or delete it. Created through ``/runs/{id}/notes/``."""
 
     serializer_class = CueNoteSerializer
     permission_classes = ROLE_PERMISSIONS
     capabilities = {"update": "operate", "partial_update": "operate", "destroy": "operate"}
+    live_topics = {"update": "notes", "partial_update": "notes", "destroy": "notes"}
+
+    def live_message(self, topic, response):
+        return {"type": topic, "run": self.note_run_id}
+
+    def get_object(self):
+        note = super().get_object()
+        self.note_run_id = note.run_id
+        return note
 
     def get_queryset(self):
         return CueNote.objects.filter(run__production__in=visible_productions(self.request.user)).select_related(
@@ -275,12 +347,13 @@ class CueNoteViewSet(mixins.UpdateModelMixin, mixins.DestroyModelMixin, viewsets
         )
 
 
-class MembershipViewSet(mixins.UpdateModelMixin, mixins.DestroyModelMixin, viewsets.GenericViewSet):
+class MembershipViewSet(LiveUpdates, mixins.UpdateModelMixin, mixins.DestroyModelMixin, viewsets.GenericViewSet):
     """Change a member's role, or remove them. Anyone may remove themselves (leave)."""
 
     serializer_class = MembershipSerializer
     permission_classes = ROLE_PERMISSIONS
     capabilities = {"update": "share", "partial_update": "share", "destroy": "share"}
+    live_topics = {"update": "access", "partial_update": "access", "destroy": "access"}
 
     def get_queryset(self):
         return Membership.objects.filter(production__in=visible_productions(self.request.user)).select_related(
