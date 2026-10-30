@@ -161,6 +161,12 @@ def test_new_times_without_a_duration_clear_the_eos_duration(client, production)
 
 
 @pytest.mark.django_db
+def test_a_bare_follow_number_is_a_follow_and_zero_is_none(client, production):
+    upload(client, production, {"text": "number,follow\n1,3\n2,0\n3,H1\n"}, dry_run="false")
+    assert list(production.cues.values_list("follow", flat=True)) == ["F3", "", "H1"]
+
+
+@pytest.mark.django_db
 def test_merge_never_blanks_existing_fields_but_replace_does(client, production):
     Cue.objects.create(production=production, number=Decimal("1"), label="Typed here", page=4)
     Cue.objects.create(production=production, number=Decimal("9"), label="Not in file")

@@ -23,7 +23,7 @@ from decimal import Decimal, InvalidOperation
 from django.core.exceptions import ValidationError
 from django.db import transaction
 
-from .models import FOLLOW_VALIDATOR, Cue, format_number
+from .models import FOLLOW_VALIDATOR, Cue, format_number, normalize_follow
 
 FIELDS = ["number", "label", "page", "scene", "notes", "time", "down_time", "duration", "follow"]
 SECONDS = ["time", "down_time", "duration"]
@@ -153,12 +153,12 @@ def clean(raw):
             times[field] = parse_seconds(text)
         except ValueError:
             return None, f"{field.replace('_', ' ').capitalize()} {text.strip()!r} is not a time in seconds or m:ss."
-    follow = raw.get("follow", "").strip().upper()
+    follow = normalize_follow(raw.get("follow", ""))
     if follow:
         try:
             FOLLOW_VALIDATOR(follow)
         except ValidationError:
-            return None, f"Follow {follow!r} should look like F2 or H0.5."
+            return None, f"Follow {follow!r} should look like 2, F2 or H0.5."
     return {
         "number": number,
         "label": raw.get("label", "").strip()[:200],

@@ -547,14 +547,26 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
               </li>,
             ])}
             {cues && cues.length === 0 && (
-              <li className="muted">{canEdit ? 'No cues yet. Switch to Edit to add some.' : 'No cues yet.'}</li>
+              <li className="muted empty-cues">
+                {canEdit ? (
+                  <>
+                    No cues yet.{' '}
+                    <button className="small" onClick={() => setImporting(true)}>
+                      Import from Eos…
+                    </button>{' '}
+                    or switch to Edit to type them in.
+                  </>
+                ) : (
+                  'No cues yet.'
+                )}
+              </li>
             )}
           </ol>
         ) : (
           <div className="edit-pane">
             <div className="row edit-tools">
               <button className="ghost small" onClick={() => setImporting(true)}>
-                Import CSV…
+                Import from Eos or CSV…
               </button>
               <button
                 className="ghost small"

@@ -68,8 +68,9 @@ export default function ImportDialog({ productionId, onImported, onClose }) {
           </button>
         </div>
         <p className="muted small-print">
-          A CSV with a <code>number</code> column (and optionally <code>label</code>, <code>page</code>,{' '}
-          <code>scene</code>, <code>notes</code>), or an ETC Eos CSV export, cues only or the whole show.
+          An ETC Eos show exported as CSV (in Eos: File › Export › CSV), cues only or the whole show. Or any CSV
+          with a <code>number</code> column, and optionally <code>label</code>, <code>page</code>,{' '}
+          <code>scene</code>, <code>notes</code>.
         </p>
 
         <div className="field-grid">
