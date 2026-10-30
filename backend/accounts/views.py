@@ -21,6 +21,8 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
+from shows.live import end_sessions
+
 from .serializers import (
     AdminUserSerializer,
     MeSerializer,
@@ -35,7 +37,9 @@ User = get_user_model()
 
 
 def new_token(user):
+    """Replace the user's token, signing out every other device (and its live updates)."""
     Token.objects.filter(user=user).delete()
+    end_sessions(user.pk)
     return Token.objects.create(user=user).key
 
 
@@ -72,6 +76,7 @@ class SignupView(AnonymousAuthView):
 class LogoutView(APIView):
     def post(self, request):
         Token.objects.filter(user=request.user).delete()
+        end_sessions(request.user.pk)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -143,6 +148,7 @@ class PasswordResetConfirmView(AnonymousAuthView):
             user.set_password(data["new_password"])
             user.save()
             Token.objects.filter(user=user).delete()
+            end_sessions(user.pk)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -171,6 +177,7 @@ class AdminUserViewSet(viewsets.ModelViewSet):
         user = serializer.save()
         if not user.is_active:
             Token.objects.filter(user=user).delete()
+            end_sessions(user.pk)
 
     def destroy(self, request, *args, **kwargs):
         user = self.get_object()
@@ -184,7 +191,9 @@ class AdminUserViewSet(viewsets.ModelViewSet):
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        user_id = user.pk
         user.delete()
+        end_sessions(user_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
 
     @action(detail=True, methods=["post"], url_path="send-reset")
