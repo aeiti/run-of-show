@@ -197,7 +197,7 @@ REST_FRAMEWORK = {
 # runserver console instead of sent; set EMAIL_BACKEND and the EMAIL_* settings
 # (EMAIL_HOST, EMAIL_PORT, EMAIL_HOST_USER, EMAIL_HOST_PASSWORD, EMAIL_USE_TLS)
 # to send them.
-FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:5173').rstrip('/')
+FRONTEND_URL = os.environ.get('FRONTEND_URL', 'http://localhost:3200').rstrip('/')
 EMAIL_BACKEND = os.environ.get('EMAIL_BACKEND', 'django.core.mail.backends.console.EmailBackend')
 EMAIL_HOST = os.environ.get('EMAIL_HOST', 'localhost')
 EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '25'))
@@ -207,7 +207,7 @@ EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', '0') == '1'
 DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', 'Run of Show <noreply@localhost>')
 
 CORS_ALLOWED_ORIGINS = [
-    o for o in os.environ.get('CORS_ALLOWED_ORIGINS', 'http://localhost:5173').split(',') if o
+    o for o in os.environ.get('CORS_ALLOWED_ORIGINS', 'http://localhost:3200').split(',') if o
 ]
 # Let the frontend read the download filename on CSV exports (cross-origin fetch
 # hides non-safelisted response headers otherwise).

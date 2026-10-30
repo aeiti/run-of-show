@@ -14,11 +14,13 @@ A theatrical cue-calling tool. You build a cue list for a production (by hand, o
 
 **Everything in Docker**
 
+The ports are lighting colour temperatures: the board is on 3200 (tungsten, the stage) and the API on 5600 (daylight).
+
 ```bash
 docker compose up -d --build
 ```
 
-This runs the database, the API at http://localhost:8000 and the board at http://localhost:5173. The source folders are mounted into the containers, so edits reload as they do on the host. The API applies migrations each time it starts, so after pulling, `docker compose up -d --build` (or `docker compose restart backend`) is enough; rebuild when `requirements.txt` or `package.json` change. Run management commands inside the container, e.g. `docker compose exec backend python manage.py seed_demo`. Uploaded files are kept in the `media` volume.
+This runs the database, the API at http://localhost:5600 and the board at http://localhost:3200. The source folders are mounted into the containers, so edits reload as they do on the host. The API applies migrations each time it starts, so after pulling, `docker compose up -d --build` (or `docker compose restart backend`) is enough; rebuild when `requirements.txt` or `package.json` change. Run management commands inside the container, e.g. `docker compose exec backend python manage.py seed_demo`. Uploaded files are kept in the `media` volume.
 
 **Or on the host**
 
@@ -30,7 +32,7 @@ You need Docker, Python 3.12, and Node 20.19+ or 22.12+.
 docker compose up -d --wait db
 ```
 
-**Backend** (http://localhost:8000)
+**Backend** (http://localhost:5600)
 
 ```bash
 cd backend
@@ -39,7 +41,7 @@ python3.12 -m venv .venv
 cp .env.example .env
 .venv/bin/python manage.py migrate
 .venv/bin/python manage.py seed_demo
-.venv/bin/python manage.py runserver
+.venv/bin/python manage.py runserver 5600
 ```
 
 `seed_demo` creates a local demo user (`demo` / `curtain-up`, an app admin) and a sample production with ten cues. It is safe to run more than once. Anyone can also create their own account from the sign-in page. For the Django admin, create a superuser with `manage.py createsuperuser`.
@@ -50,7 +52,7 @@ Uploaded scripts, showfiles and logos are stored in `backend/media/` (gitignored
 
 Password reset emails are printed to the `runserver` console in development; the link in them opens the frontend at `FRONTEND_URL`. To send real email, set `EMAIL_BACKEND` and the `EMAIL_*` settings (see `backend/.env.example`).
 
-**Frontend** (http://localhost:5173)
+**Frontend** (http://localhost:3200)
 
 ```bash
 cd frontend
@@ -58,7 +60,7 @@ npm install
 npm run dev
 ```
 
-The login form is prefilled with the demo account. Set `VITE_API_URL` (see `frontend/.env.example`) if the API is not on `localhost:8000`.
+The login form is prefilled with the demo account. Set `VITE_API_URL` (see `frontend/.env.example`) if the API is not on `localhost:5600`.
 
 **Tests**
 

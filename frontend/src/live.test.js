@@ -124,6 +124,6 @@ describe('follow', () => {
 
 describe('socketUrl', () => {
   it('puts the path on the API host with a ws scheme', () => {
-    expect(socketUrl('/ws/productions/3/')).toBe('ws://localhost:8000/ws/productions/3/')
+    expect(socketUrl('/ws/productions/3/')).toBe('ws://localhost:5600/ws/productions/3/')
   })
 })

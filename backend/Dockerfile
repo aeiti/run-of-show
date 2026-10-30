@@ -13,6 +13,6 @@ COPY requirements.txt .
 RUN pip install -r requirements.txt
 COPY . .
 
-EXPOSE 8000
+EXPOSE 5600
 # Migrations run on every start, so a pull with new ones just needs a restart.
-CMD ["sh", "-c", "python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:8000"]
+CMD ["sh", "-c", "python manage.py migrate --noinput && python manage.py runserver 0.0.0.0:5600"]
