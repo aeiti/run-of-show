@@ -8,6 +8,7 @@ import CueEditor from './board/CueEditor'
 import FilesDialog from './board/FilesDialog'
 import PeopleDialog from './board/PeopleDialog'
 import { can } from './access'
+import Unavailable from './Unavailable'
 import ImportDialog from './board/ImportDialog'
 import ProductionHeader from './board/ProductionHeader'
 import Playback from './board/Playback'
@@ -47,6 +48,8 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
   const [files, setFiles] = useState([])
   const [showFiles, setShowFiles] = useState(false)
   const [showScript, setShowScript] = useState(false)
+  // No such production, or access to it was lost (the server doesn't say which).
+  const [gone, setGone] = useState(false)
 
   const scope = useRef(null)
   const cardRefs = useRef([])
@@ -110,7 +113,7 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
           onSelectRun(target.id, { replace: true })
         }
       })
-      .catch((e) => setError(e.message))
+      .catch((e) => (e.status === 404 ? setGone(true) : setError(e.message)))
     return () => {
       cancelled = true
     }
@@ -367,7 +370,7 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
           setProduction(await api.production(productionId))
           break
         case 'production.deleted':
-          onBack()
+          setGone(true)
           break
         case 'resync': {
           const [p, c, r] = await Promise.all([api.production(productionId), api.cues(productionId), api.runs(productionId)])
@@ -390,7 +393,7 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
         onMessage: (message) => onLive.current(message),
         onResync: () => onLive.current({ type: 'resync' }),
         onStatus: setLiveStatus,
-        onGone: onBack,
+        onGone: () => setGone(true),
         onSignedOut,
       }),
     // One socket per production; the handlers read the latest state through onLive.
@@ -436,6 +439,7 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
     ? `${loadedCue ? 'Loaded' : 'Next'}: Q${nextCue.number} ${nextCue.label}`
     : 'End of cue list'
 
+  if (gone) return <Unavailable me={me} />
   return (
     <main className={`board ${playingBack ? 'is-playing-back' : ''}`} ref={scope}>
       <div className="board-head">
