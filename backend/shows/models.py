@@ -1,3 +1,4 @@
+import os
 import uuid
 
 from django.conf import settings
@@ -10,6 +11,12 @@ from django.utils.text import get_valid_filename
 from .uploads import delete_stored
 
 
+def production_logo_path(instance, filename):
+    # A new name for each logo, so the old file can be deleted after the new
+    # one is saved, and the name changes whenever the logo does.
+    return f"productions/{instance.pk}/logo-{uuid.uuid4().hex}{os.path.splitext(filename)[1]}"
+
+
 class Production(models.Model):
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="productions"
@@ -19,6 +26,8 @@ class Production(models.Model):
     venue = models.CharField(max_length=200, blank=True)
     performance_date = models.DateField(null=True, blank=True)
     notes = models.TextField(blank=True)
+    # An optional PNG, JPEG, GIF or WebP, set through /productions/{id}/logo/.
+    logo = models.FileField(upload_to=production_logo_path, blank=True, max_length=500)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -26,6 +35,11 @@ class Production(models.Model):
 
     def __str__(self):
         return self.name
+
+
+@receiver(post_delete, sender=Production)
+def delete_production_logo(sender, instance, **kwargs):
+    delete_stored(instance.logo)
 
 
 class Membership(models.Model):

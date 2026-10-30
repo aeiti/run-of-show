@@ -161,6 +161,7 @@ if os.environ.get('AWS_STORAGE_BUCKET_NAME'):
 # before this is checked, so in production a proxy in front should cap request
 # size as well.
 PRODUCTION_FILE_MAX_SIZE = int(float(os.environ.get('PRODUCTION_FILE_MAX_MB') or 50) * 1024 * 1024)
+PRODUCTION_LOGO_MAX_SIZE = int(float(os.environ.get('PRODUCTION_LOGO_MAX_MB') or 2) * 1024 * 1024)
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field

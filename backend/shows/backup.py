@@ -1,5 +1,7 @@
-"""Whole-production backup: one JSON file with the details, cues, runs and
-run logs, and the import that turns such a file back into a new production.
+"""Whole-production backup: one JSON file with the details, logo, cues, runs
+and run logs, and the import that turns such a file back into a new production.
+The logo is inline as base64; scripts and showfiles are left out, since they
+could make the file hundreds of megabytes.
 
 Duplicating a production is an export without runs, imported straight back.
 
@@ -9,9 +11,13 @@ are written after it. That is the one time event rows are touched after they are
 and only to restore the original history.
 """
 
+import base64
+
+from django.core.files.base import ContentFile
 from django.db import transaction
 from django.utils import timezone
 
+from . import uploads
 from .models import Cue, CueEvent, CueNote, Production, Run
 from .serializers import (
     BACKUP_FORMAT,
@@ -30,6 +36,12 @@ def export_production(production, runs=True):
         "production": BackupProductionSerializer(production).data,
         "cues": BackupCueSerializer(production.cues.all(), many=True).data,
     }
+    if production.logo:
+        with production.logo.open("rb") as f:
+            data["logo"] = {
+                "content_type": uploads.content_type_for(production.logo.name),
+                "data": base64.b64encode(f.read()).decode("ascii"),
+            }
     if runs:
         history = production.runs.order_by("created_at", "id").prefetch_related("events__cue", "cue_notes__cue")
         data["runs"] = BackupRunSerializer(history, many=True).data
@@ -76,6 +88,12 @@ def import_production(owner, data, **details):
             updated_at = note.pop("updated_at", None) or created_at
             row = CueNote.objects.create(run=run, cue_id=cue_ids.get(linked), **note)
             CueNote.objects.filter(pk=row.pk).update(created_at=created_at, updated_at=updated_at)
+
+    # Last, so a failure earlier in the import can't leave a stored image with no production.
+    if data.get("logo"):
+        image = data["logo"]["data"]
+        _, ext = uploads.image_type(image[:16])
+        production.logo.save(f"logo.{ext}", ContentFile(image))
 
     return production
 

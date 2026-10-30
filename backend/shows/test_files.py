@@ -193,3 +193,154 @@ def test_deleting_the_production_deletes_its_stored_files(show, media, django_ca
 
     assert stored(media) == []
     assert ProductionFile.objects.count() == 0
+
+
+# Production logos
+
+PNG = b"\x89PNG\r\n\x1a\n" + b"png pixels"
+JPEG = b"\xff\xd8\xff\xe0" + b"jpeg pixels"
+
+
+def put_logo(client, production, content=PNG, name="logo.png"):
+    return client.put(
+        f"/api/productions/{production.id}/logo/", {"file": SimpleUploadedFile(name, content)}, format="multipart"
+    )
+
+
+@pytest.mark.django_db
+def test_a_logo_is_uploaded_shown_and_fetched(show, media):
+    client = client_for(show.owner)
+    assert client.get(f"/api/productions/{show.production.id}/").data["logo"] is None
+
+    response = put_logo(client, show.production)
+
+    assert response.status_code == 200
+    token = response.data["logo"]
+    assert token
+    assert client.get("/api/productions/").data[0]["logo"] == token
+    image = client.get(f"/api/productions/{show.production.id}/logo/")
+    assert body(image) == PNG
+    assert image["Content-Type"] == "image/png"
+    assert stored(media) == [PNG]
+
+
+@pytest.mark.django_db
+def test_replacing_a_logo_deletes_the_old_image(show, media, django_capture_on_commit_callbacks):
+    client = client_for(show.owner)
+    first = put_logo(client, show.production).data["logo"]
+
+    with django_capture_on_commit_callbacks(execute=True):
+        second = put_logo(client, show.production, JPEG, "logo.jpg").data["logo"]
+
+    assert second != first
+    assert stored(media) == [JPEG]
+    assert client.get(f"/api/productions/{show.production.id}/logo/")["Content-Type"] == "image/jpeg"
+
+
+@pytest.mark.django_db
+def test_removing_a_logo(show, media, django_capture_on_commit_callbacks):
+    client = client_for(show.owner)
+    put_logo(client, show.production)
+
+    with django_capture_on_commit_callbacks(execute=True):
+        response = client.delete(f"/api/productions/{show.production.id}/logo/")
+
+    assert (response.status_code, response.data["logo"]) == (200, None)
+    assert stored(media) == []
+    assert client.get(f"/api/productions/{show.production.id}/logo/").status_code == 404
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "content, name",
+    [
+        (b'<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>', "logo.svg"),
+        (b"just text", "logo.png"),
+        (PDF, "logo.gif"),
+    ],
+)
+def test_a_logo_must_be_an_image(show, media, content, name, django_capture_on_commit_callbacks):
+    client = client_for(show.owner)
+    put_logo(client, show.production)
+
+    with django_capture_on_commit_callbacks(execute=True):
+        refused = put_logo(client, show.production, content, name)
+
+    assert refused.status_code == 400
+    assert "PNG, JPEG, GIF or WebP" in str(refused.data["file"])
+    # The logo it had is untouched.
+    assert stored(media) == [PNG]
+    assert body(client.get(f"/api/productions/{show.production.id}/logo/")) == PNG
+
+
+@pytest.mark.django_db
+def test_logos_over_the_limit_are_refused(show, media, settings):
+    settings.PRODUCTION_LOGO_MAX_SIZE = len(PNG)
+    client = client_for(show.owner)
+
+    refused = put_logo(client, show.production, PNG + b"!")
+    assert refused.status_code == 400
+    assert "up to" in str(refused.data["file"])
+    assert stored(media) == []
+    assert put_logo(client, show.production, PNG).status_code == 200
+
+
+@pytest.mark.django_db
+def test_any_role_sees_the_logo_but_only_editors_change_it(show, make_user):
+    put_logo(client_for(show.owner), show.production)
+    viewer = client_for(member(show, make_user, "viewer"))
+    operator = client_for(member(show, make_user, "operator"))
+    manager = client_for(member(show, make_user, "stage_manager"))
+    stranger = client_for(make_user("mallory"))
+
+    assert body(viewer.get(f"/api/productions/{show.production.id}/logo/")) == PNG
+    assert put_logo(viewer, show.production, JPEG).status_code == 403
+    assert put_logo(operator, show.production, JPEG).status_code == 403
+    assert viewer.delete(f"/api/productions/{show.production.id}/logo/").status_code == 403
+    assert stranger.get(f"/api/productions/{show.production.id}/logo/").status_code == 404
+    assert put_logo(stranger, show.production, JPEG).status_code == 404
+    assert put_logo(manager, show.production, JPEG).status_code == 200
+
+
+@pytest.mark.django_db
+def test_deleting_the_production_deletes_its_logo(show, media, django_capture_on_commit_callbacks):
+    client = client_for(show.owner)
+    put_logo(client, show.production)
+
+    with django_capture_on_commit_callbacks(execute=True):
+        client.delete(f"/api/productions/{show.production.id}/")
+
+    assert stored(media) == []
+
+
+@pytest.mark.django_db
+def test_the_logo_goes_with_a_backup_and_a_copy(show, media):
+    client = client_for(show.owner)
+    put_logo(client, show.production)
+    upload(client, show.production)
+    exported = client.get(f"/api/productions/{show.production.id}/export/").json()
+
+    imported = client.post("/api/productions/import/", exported, format="json")
+    copy = client.post(f"/api/productions/{show.production.id}/duplicate/", {}, format="json")
+
+    for made in (imported, copy):
+        assert made.status_code == 201
+        assert made.data["logo"]
+        assert body(client.get(f"/api/productions/{made.data['id']}/logo/")) == PNG
+        # Scripts and showfiles stay behind.
+        assert client.get(f"/api/productions/{made.data['id']}/files/").data == []
+    # Each production has its own copy of the image.
+    assert stored(media) == sorted([PNG, PNG, PNG, b"eos show"])
+
+
+@pytest.mark.django_db
+def test_a_backup_without_a_logo_still_imports_and_a_bad_one_is_refused(show):
+    client = client_for(show.owner)
+    exported = client.get(f"/api/productions/{show.production.id}/export/").json()
+    assert "logo" not in exported
+    assert client.post("/api/productions/import/", exported, format="json").data["logo"] is None
+
+    bad = {**exported, "logo": {"data": "not base64!"}}
+    assert "base64" in str(client.post("/api/productions/import/", bad, format="json").data["logo"])
+    text = {**exported, "logo": {"data": "aGVsbG8="}}
+    assert "PNG" in str(client.post("/api/productions/import/", text, format="json").data["logo"])

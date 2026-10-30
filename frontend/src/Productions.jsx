@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from './api'
 import { ROLES } from './access'
+import ProductionLogo from './ProductionLogo'
 
 const blank = { name: '', company: '', venue: '', performance_date: '' }
 
@@ -67,7 +68,10 @@ export default function Productions({ onOpen }) {
           {productions.map((p) => (
             <li key={p.id}>
               <button className="production-open" onClick={() => onOpen(p.id)}>
-                <strong>{p.name}</strong>
+                <span className="production-title">
+                  <ProductionLogo production={p} />
+                  <strong>{p.name}</strong>
+                </span>
                 <span className="muted">
                   {[p.company, p.venue, p.performance_date].filter(Boolean).join(' · ')}
                   {p.role !== 'owner' && (

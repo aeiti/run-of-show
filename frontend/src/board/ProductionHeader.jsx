@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { api } from '../api'
 import { can, ROLES } from '../access'
+import ProductionLogo from '../ProductionLogo'
+import LogoField from './LogoField'
 
 const FIELDS = ['name', 'company', 'venue', 'performance_date', 'notes']
 
@@ -43,7 +45,10 @@ export default function ProductionHeader({ production, onSaved, onDeleted, onPeo
     return (
       <div className="production-header">
         <div className="row-between">
-          <h2>{production.name}</h2>
+          <h2 className="production-title">
+            <ProductionLogo production={production} />
+            {production.name}
+          </h2>
           <div className="row header-actions">
             {onScript && (
               <button className={`ghost small${scriptShown ? ' on' : ''}`} aria-pressed={scriptShown} onClick={onScript}>
@@ -101,6 +106,7 @@ export default function ProductionHeader({ production, onSaved, onDeleted, onPeo
           Notes
           <textarea rows={2} {...field('notes')} />
         </label>
+        <LogoField production={production} onSaved={onSaved} />
       </div>
       <div className="row">
         <button type="submit">Save</button>

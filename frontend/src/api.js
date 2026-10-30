@@ -94,6 +94,11 @@ export const api = {
   production: (id) => request(`/productions/${id}/`),
   updateProduction: (id, data) => request(`/productions/${id}/`, { method: 'PATCH', body: data }),
   deleteProduction: (id) => request(`/productions/${id}/`, { method: 'DELETE' }),
+  // The logo is private like the rest: fetch it as a blob. Changes return the production.
+  logoBlob: (id) => blob(`/productions/${id}/logo/`),
+  // form is FormData with the image as file.
+  uploadLogo: (id, form) => request(`/productions/${id}/logo/`, { method: 'PUT', body: form }),
+  deleteLogo: (id) => request(`/productions/${id}/logo/`, { method: 'DELETE' }),
   // A copy with the cue list but no runs; data overrides the copy's details.
   duplicateProduction: (id, data = {}) => request(`/productions/${id}/duplicate/`, { method: 'POST', body: data }),
   exportProduction: (id) => download(`/productions/${id}/export/`),

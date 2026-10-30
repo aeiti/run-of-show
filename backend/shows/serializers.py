@@ -1,3 +1,5 @@
+import base64
+import binascii
 import os
 
 from django.conf import settings
@@ -65,14 +67,42 @@ class ProductionSerializer(serializers.ModelSerializer):
     owner = PersonSerializer(read_only=True)
     # The requesting user's role, so the UI can show only what they may do.
     role = serializers.SerializerMethodField()
+    # Null, or a token that changes whenever the logo does. The image itself
+    # is private, so it is fetched from /productions/{id}/logo/.
+    logo = serializers.SerializerMethodField()
 
     class Meta:
         model = Production
-        fields = ["id", "name", "company", "venue", "performance_date", "notes", "created_at", "owner", "role"]
+        fields = ["id", "name", "company", "venue", "performance_date", "notes", "logo", "created_at", "owner", "role"]
         read_only_fields = ["id", "created_at"]
 
     def get_role(self, production):
         return role_for(production, self.context["request"].user)
+
+    def get_logo(self, production):
+        return os.path.basename(production.logo.name) if production.logo else None
+
+
+def check_logo(head, size):
+    """(content type, extension) of an acceptable logo, from its size and first bytes."""
+    limit = settings.PRODUCTION_LOGO_MAX_SIZE
+    if size > limit:
+        raise serializers.ValidationError(f"A logo can be up to {megabytes(limit)} MB.")
+    image = uploads.image_type(head)
+    if image is None:
+        raise serializers.ValidationError("A logo must be a PNG, JPEG, GIF or WebP image.")
+    return image
+
+
+class LogoUploadSerializer(serializers.Serializer):
+    file = serializers.FileField()
+
+    def validate(self, data):
+        try:
+            data["content_type"], data["ext"] = check_logo(uploads.read_head(data["file"]), data["file"].size)
+        except serializers.ValidationError as e:
+            raise serializers.ValidationError({"file": e.detail})
+        return data
 
 
 class MembershipSerializer(serializers.ModelSerializer):
@@ -332,11 +362,29 @@ class BackupRunSerializer(serializers.ModelSerializer):
         fields = ["label", "kind", "created_at", "ended_at", "notes", "events", "cue_notes"]
 
 
+class BackupLogoSerializer(serializers.Serializer):
+    """The logo inline as base64. Its type is read from the image, not from ``content_type``."""
+
+    content_type = serializers.CharField(required=False)
+    data = serializers.CharField()
+
+    def validate_data(self, value):
+        try:
+            image = base64.b64decode(value, validate=True)
+        except binascii.Error:
+            raise serializers.ValidationError("The logo is not valid base64.")
+        check_logo(image[:16], len(image))
+        return image
+
+
 class BackupSerializer(serializers.Serializer):
     format = serializers.CharField()
     version = serializers.IntegerField()
     exported_at = serializers.DateTimeField(required=False)
     production = BackupProductionSerializer()
+    # Added after version 1 without a bump: a file without it still imports,
+    # and an older app ignores it.
+    logo = BackupLogoSerializer(required=False, allow_null=True)
     cues = BackupCueSerializer(many=True, required=False)
     runs = BackupRunSerializer(many=True, required=False)
 
