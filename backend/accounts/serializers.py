@@ -16,6 +16,9 @@ def check_password(password, user=None):
 
 
 def check_email_free(email, user=None):
+    """Emails are unique regardless of case. Any number of accounts may have none."""
+    if not email:
+        return ""
     clash = User.objects.filter(email__iexact=email)
     if user is not None:
         clash = clash.exclude(pk=user.pk)
@@ -63,10 +66,18 @@ class MeSerializer(serializers.ModelSerializer):
 
 
 class AdminUserSerializer(serializers.ModelSerializer):
-    """A user as an admin manages them. ``is_active`` false means suspended."""
+    """A user as an admin manages them. ``is_active`` false means suspended.
 
+    Admins aren't held to the self-service password rules: a password can be
+    anything but empty, without Django's strength validators. The email must
+    be well-formed and not used by another account, or null for none (stored
+    as "").
+    """
+
+    email = serializers.EmailField(max_length=254, allow_blank=True, allow_null=True, required=False)
     display_name = serializers.CharField(source="profile.display_name", max_length=100, allow_blank=True, required=False)
     is_admin = serializers.BooleanField(source="is_staff", required=False)
+    # Not null and not "" (DRF's defaults); anything else goes.
     password = serializers.CharField(write_only=True, trim_whitespace=False, required=False)
     productions_owned = serializers.IntegerField(read_only=True)
 
@@ -85,11 +96,12 @@ class AdminUserSerializer(serializers.ModelSerializer):
             "last_login",
         ]
         read_only_fields = ["id", "date_joined", "last_login"]
-        extra_kwargs = {"email": {"required": True}}
 
     def to_representation(self, user):
         profile_for(user)
-        return super().to_representation(user)
+        data = super().to_representation(user)
+        data["email"] = data["email"] or None
+        return data
 
     def validate_username(self, value):
         User.username_validator(value)
@@ -101,17 +113,12 @@ class AdminUserSerializer(serializers.ModelSerializer):
         return value
 
     def validate_email(self, value):
-        return check_email_free(value, self.instance)
+        # Django keeps "no email" as "", not NULL.
+        return check_email_free(value or "", self.instance)
 
     def validate(self, data):
-        if self.instance is None and not data.get("password"):
+        if self.instance is None and "password" not in data:
             raise serializers.ValidationError({"password": "Set a password for the new account."})
-        if data.get("password"):
-            candidate = self.instance or User(username=data.get("username", ""), email=data.get("email", ""))
-            try:
-                check_password(data["password"], candidate)
-            except serializers.ValidationError as e:
-                raise serializers.ValidationError({"password": e.detail})
         # An admin can't lock themselves out.
         me = self.context["request"].user
         if self.instance is not None and self.instance.pk == me.pk:
@@ -134,7 +141,7 @@ class AdminUserSerializer(serializers.ModelSerializer):
         profile_data = data.pop("profile", {})
         password = data.pop("password", None)
         user = super().update(user, data)
-        if password:
+        if password is not None:
             user.set_password(password)
             user.save()
         self._save_profile(user, profile_data)
