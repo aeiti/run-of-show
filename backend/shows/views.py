@@ -8,9 +8,10 @@ from rest_framework.response import Response
 
 from . import backup, csv_io, services
 from .access import ProductionRole, visible_productions
-from .models import Cue, Membership, Run
+from .models import Cue, CueNote, Membership, Run
 from .serializers import (
     CueEventSerializer,
+    CueNoteSerializer,
     CueSerializer,
     CueTargetSerializer,
     HoldSerializer,
@@ -176,11 +177,14 @@ class RunViewSet(mixins.RetrieveModelMixin, mixins.UpdateModelMixin, viewsets.Ge
         "reset": "operate",
         "hold": "operate",
         "resume": "operate",
+        "cue_notes": "operate",
         "end": "operate",
     }
 
     def get_queryset(self):
-        return Run.objects.filter(production__in=visible_productions(self.request.user)).prefetch_related("events")
+        return Run.objects.filter(production__in=visible_productions(self.request.user)).prefetch_related(
+            "events", "cue_notes__author__profile"
+        )
 
     def get_serializer_class(self):
         return RunDetailSerializer if self.action == "retrieve" else RunSerializer
@@ -235,6 +239,17 @@ class RunViewSet(mixins.RetrieveModelMixin, mixins.UpdateModelMixin, viewsets.Ge
     def resume(self, request, pk=None):
         return self._act(request, pk, services.resume)
 
+    @action(detail=True, methods=["get", "post"], url_path="notes")
+    def cue_notes(self, request, pk=None):
+        """Notes on cues in this run. POST ``cue`` (an id) and ``text``; works on an ended run too."""
+        run = self.get_object()
+        if request.method == "GET":
+            return Response(CueNoteSerializer(run.cue_notes.select_related("author__profile"), many=True).data)
+        serializer = CueNoteSerializer(data=request.data, context={"run": run})
+        serializer.is_valid(raise_exception=True)
+        serializer.save(run=run, author=request.user)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
+
     @action(detail=True, methods=["get"])
     def export(self, request, pk=None):
         run = self.get_object()
@@ -245,6 +260,19 @@ class RunViewSet(mixins.RetrieveModelMixin, mixins.UpdateModelMixin, viewsets.Ge
     def end(self, request, pk=None):
         run = self.get_object()
         return Response(RunSerializer(services.end(run)).data)
+
+
+class CueNoteViewSet(mixins.UpdateModelMixin, mixins.DestroyModelMixin, viewsets.GenericViewSet):
+    """Change a cue note's text, or delete it. Created through ``/runs/{id}/notes/``."""
+
+    serializer_class = CueNoteSerializer
+    permission_classes = ROLE_PERMISSIONS
+    capabilities = {"update": "operate", "partial_update": "operate", "destroy": "operate"}
+
+    def get_queryset(self):
+        return CueNote.objects.filter(run__production__in=visible_productions(self.request.user)).select_related(
+            "run__production", "author__profile"
+        )
 
 
 class MembershipViewSet(mixins.UpdateModelMixin, mixins.DestroyModelMixin, viewsets.GenericViewSet):

@@ -108,6 +108,11 @@ button.danger:not(.ghost) { background: #2a1214; }
 .cue-number { font-weight: 700; font-size: 1.05rem; }
 .cue-label { min-width: 0; }
 .cue-notes { display: block; color: var(--muted); font-size: 0.72rem; margin-top: 0.15rem; }
+.run-note { display: block; color: var(--stby); font-size: 0.72rem; margin-top: 0.15rem; }
+.note-form { margin-top: 0.6rem; }
+.log-note .note-tools { display: inline-flex; gap: 0.2rem; margin-left: 0.3rem; }
+.log-note .note-tools .small { padding: 0 0.35rem; font-size: 0.65rem; }
+.log-note form { margin: 0.2rem 0 0; }
 .scene-divider {
   font-size: 0.68rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--stby);
   padding: 0.6rem 0.2rem 0.1rem; border-bottom: 1px dashed var(--line);

@@ -69,7 +69,7 @@ export default function Transport({
           {confirmReset ? 'Confirm' : 'RESET'}
         </button>
       </div>
-      <p className="muted keys">Space GO · B BACK · G GOTO · ↑↓ load · Esc unload</p>
+      <p className="muted keys">Space GO · B BACK · G GOTO · N note · ↑↓ load · Esc unload</p>
       <HoldControl hold={hold} disabled={disabled} onAction={onAction} />
     </div>
   )
