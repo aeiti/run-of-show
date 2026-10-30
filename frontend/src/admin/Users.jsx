@@ -100,7 +100,7 @@ export default function Users({ me }) {
                       {!u.is_active && <span className="badge">suspended</span>}
                       {u.display_name && <div className="muted">{u.display_name}</div>}
                     </td>
-                    <td>{u.email}</td>
+                    <td>{u.email ?? <span className="muted">–</span>}</td>
                     <td>{u.productions_owned}</td>
                     <td className="muted">{u.last_login ? new Date(u.last_login).toLocaleDateString() : 'never'}</td>
                     <td>
@@ -174,13 +174,16 @@ export default function Users({ me }) {
 /** Create a user (no ``user``) or edit one. A blank password leaves it unchanged. */
 function UserForm({ user, self, onSubmit }) {
   const [form, setForm] = useState(
-    user ? { ...blank, username: user.username, email: user.email, display_name: user.display_name, is_admin: user.is_admin } : blank,
+    user
+      ? { ...blank, username: user.username, email: user.email ?? '', display_name: user.display_name, is_admin: user.is_admin }
+      : blank,
   )
   const field = (key) => ({ value: form[key], onChange: (e) => setForm({ ...form, [key]: e.target.value }) })
 
   async function submit(e) {
     e.preventDefault()
-    const data = { ...form }
+    // An empty email box means no email; an empty password box on an edit means keep the current one.
+    const data = { ...form, email: form.email.trim() || null }
     if (user && !data.password) delete data.password
     // A new-user form clears once the account is created.
     if ((await onSubmit(data)) && !user) setForm(blank)
@@ -194,7 +197,7 @@ function UserForm({ user, self, onSubmit }) {
       </label>
       <label>
         Email
-        <input required type="email" autoComplete="off" {...field('email')} />
+        <input type="email" autoComplete="off" placeholder="none" {...field('email')} />
       </label>
       <label>
         Display name

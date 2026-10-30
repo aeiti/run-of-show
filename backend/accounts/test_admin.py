@@ -46,8 +46,8 @@ def test_admin_creates_a_user_who_can_sign_in(admin):
     client = signed_in(admin)
     body = {"username": "carol", "email": "carol@example.com", "display_name": "Carol", "password": "follow-spot-99"}
     assert client.post(URL, {**body, "password": ""}, format="json").status_code == 400
-    assert client.post(URL, {**body, "password": "123"}, format="json").status_code == 400
-    assert client.post(URL, {**body, "email": "ROOT@example.com"}, format="json").status_code == 400
+    assert client.post(URL, {**body, "password": None}, format="json").status_code == 400
+    assert client.post(URL, {k: v for k, v in body.items() if k != "password"}, format="json").status_code == 400
 
     created = client.post(URL, body, format="json")
     assert created.status_code == 201
@@ -116,3 +116,54 @@ def test_admin_can_send_a_reset_link(admin, bob):
     bob.is_active = False
     bob.save()
     assert client.post(f"{URL}{bob.id}/send-reset/").status_code == 400
+
+
+@pytest.mark.django_db
+def test_admin_sets_any_non_empty_password(admin, bob):
+    client = signed_in(admin)
+    # Short, common, all digits, like the username: self-service would refuse each.
+    for password in ("1", "password", "12345678", "bob", " "):
+        assert client.patch(f"{URL}{bob.id}/", {"password": password}, format="json").status_code == 200, password
+        bob.refresh_from_db()
+        assert bob.check_password(password)
+
+    assert client.patch(f"{URL}{bob.id}/", {"password": None}, format="json").status_code == 400
+    assert client.patch(f"{URL}{bob.id}/", {"password": ""}, format="json").status_code == 400
+    bob.refresh_from_db()
+    assert bob.check_password(" ")
+    # Leaving the password out keeps it.
+    assert client.patch(f"{URL}{bob.id}/", {"display_name": "Bob"}, format="json").status_code == 200
+    bob.refresh_from_db()
+    assert bob.check_password(" ")
+
+    created = client.post(URL, {"username": "dan", "email": None, "password": "x"}, format="json")
+    assert created.status_code == 201
+    assert APIClient().post("/api/auth/token/", {"username": "dan", "password": "x"}).status_code == 200
+
+
+@pytest.mark.django_db
+def test_admin_sets_any_well_formed_email_or_none(admin, bob):
+    client = signed_in(admin)
+    url = f"{URL}{bob.id}/"
+
+    # Shared with another account is fine for an admin.
+    assert client.patch(url, {"email": "ROOT@example.com"}, format="json").data["email"] == "ROOT@example.com"
+    for cleared in (None, ""):
+        assert client.patch(url, {"email": cleared}, format="json").data["email"] is None
+        bob.refresh_from_db()
+        assert bob.email == ""
+
+    for bad in ("not-an-email", "bob@", "@example.com", "bob example.com"):
+        assert client.patch(url, {"email": bad}, format="json").status_code == 400, bad
+    # No email means no reset link.
+    assert client.post(f"{url}send-reset/").status_code == 400
+
+
+@pytest.mark.django_db
+def test_user_with_an_admin_set_shared_email_can_still_save_their_profile(admin, bob):
+    signed_in(admin).patch(f"{URL}{bob.id}/", {"email": "root@example.com"}, format="json")
+    me = signed_in(bob).patch("/api/auth/me/", {"display_name": "Bob", "email": "root@example.com"}, format="json")
+    assert me.status_code == 200
+    # Choosing someone else's email themselves is still refused.
+    User.objects.create_user(username="carol", email="carol@example.com", password=PASSWORD)
+    assert signed_in(bob).patch("/api/auth/me/", {"email": "carol@example.com"}, format="json").status_code == 400

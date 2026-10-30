@@ -11,7 +11,7 @@ export default function Profile({ me, onSaved }) {
 }
 
 function Details({ me, onSaved }) {
-  const [form, setForm] = useState({ display_name: me.display_name, email: me.email })
+  const [form, setForm] = useState({ display_name: me.display_name, email: me.email ?? '' })
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
 
@@ -45,7 +45,7 @@ function Details({ me, onSaved }) {
       </label>
       <label>
         Email
-        <input required type="email" autoComplete="email" {...field('email')} />
+        <input type="email" autoComplete="email" {...field('email')} />
       </label>
       <button type="submit">Save</button>
       {status && <p className="ok">{status}</p>}
