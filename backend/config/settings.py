@@ -138,6 +138,39 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 
+# Uploaded scripts, showfiles and logos. They are private to a production, so
+# they are only served through the API (which checks the user's role), never
+# from a public media URL. Stored on the filesystem under MEDIA_ROOT unless an
+# S3 bucket is configured, in which case they go to S3 or any S3-compatible
+# service (AWS_S3_ENDPOINT_URL), private and without public URLs.
+MEDIA_ROOT = Path(os.environ.get('MEDIA_ROOT') or BASE_DIR / 'media')
+
+STORAGES = {
+    'default': {'BACKEND': 'django.core.files.storage.FileSystemStorage'},
+    'staticfiles': {'BACKEND': 'django.contrib.staticfiles.storage.StaticFilesStorage'},
+}
+if os.environ.get('AWS_STORAGE_BUCKET_NAME'):
+    STORAGES['default'] = {
+        'BACKEND': 'storages.backends.s3.S3Storage',
+        'OPTIONS': {
+            'bucket_name': os.environ['AWS_STORAGE_BUCKET_NAME'],
+            # Unset means AWS; set it for MinIO, R2, Spaces and the like.
+            'endpoint_url': os.environ.get('AWS_S3_ENDPOINT_URL') or None,
+            'region_name': os.environ.get('AWS_S3_REGION_NAME') or None,
+            # Keys can also come from the usual AWS environment or instance role.
+            'access_key': os.environ.get('AWS_ACCESS_KEY_ID') or None,
+            'secret_key': os.environ.get('AWS_SECRET_ACCESS_KEY') or None,
+            'default_acl': 'private',
+            'file_overwrite': False,
+        },
+    }
+
+# Upload limits in bytes, set in megabytes. Django receives the whole upload
+# before this is checked, so in production a proxy in front should cap request
+# size as well.
+PRODUCTION_FILE_MAX_SIZE = int(float(os.environ.get('PRODUCTION_FILE_MAX_MB') or 50) * 1024 * 1024)
+PRODUCTION_LOGO_MAX_SIZE = int(float(os.environ.get('PRODUCTION_LOGO_MAX_MB') or 2) * 1024 * 1024)
+
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 

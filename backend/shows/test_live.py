@@ -133,3 +133,34 @@ async def test_deleting_the_production_sends_boards_away(show):
     assert await call(show.owner, "delete", f"/api/productions/{show.production.id}/") == 204
     assert await socket.receive_json_from() == {"type": "production.deleted"}
     assert await closed_with(socket) == 4404
+
+
+@sync_to_async
+def upload(user, url, method="post", **fields):
+    from django.core.files.uploadedfile import SimpleUploadedFile
+
+    files = {k: SimpleUploadedFile(*v) if isinstance(v, tuple) else v for k, v in fields.items()}
+    return getattr(client_for(user), method)(url, files, format="multipart")
+
+
+async def test_file_and_logo_changes_are_announced(show, settings, tmp_path):
+    settings.MEDIA_ROOT = tmp_path
+    socket = await connect(show.production, await token_for(show.owner))
+    await socket.receive_json_from()
+    prod = show.production
+
+    added = await upload(show.owner, f"/api/productions/{prod.id}/files/", file=("plan.txt", b"plan"), kind="other")
+    assert added.status_code == 201
+    assert await socket.receive_json_from() == {"type": "files"}
+    assert await call(show.owner, "delete", f"/api/files/{added.data['id']}/") == 204
+    assert await socket.receive_json_from() == {"type": "files"}
+
+    png = b"\x89PNG\r\n\x1a\n" + b"\0" * 32
+    logo = await upload(show.owner, f"/api/productions/{prod.id}/logo/", method="put", file=("logo.png", png))
+    assert logo.status_code == 200
+    assert await socket.receive_json_from() == {"type": "production"}
+    # Listing files and fetching the logo say nothing.
+    await call(show.owner, "get", f"/api/productions/{prod.id}/files/")
+    await call(show.owner, "get", f"/api/productions/{prod.id}/logo/")
+    assert await socket.receive_nothing(timeout=0.2)
+    await socket.disconnect()

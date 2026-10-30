@@ -6,8 +6,8 @@ sends the group one small message:
 
 * ``run.event``: an operator action, with the event and the run's new state,
   so boards can play it straight away.
-* ``cues``, ``runs``, ``notes``, ``production``: that part changed; boards
-  refetch it.
+* ``cues``, ``runs``, ``notes``, ``files``, ``production``: that part changed;
+  boards refetch it. A new or removed logo is a ``production`` change.
 * ``access``: membership changed. Each socket rechecks its user's access and
   closes if it's gone; boards refetch the production, since the role may differ.
 * ``production.deleted``: boards leave.

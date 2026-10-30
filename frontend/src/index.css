@@ -172,6 +172,7 @@ select { font: inherit; color: inherit; background: #181b21; border: 1px solid v
 
 @media (max-width: 760px) {
   .productions, .board-body, .users { grid-template-columns: 1fr; }
+  .board-body.with-script .script-viewer { grid-row: auto; }
   .production-list li { flex-wrap: wrap; justify-content: flex-end; }
   .production-open { flex-basis: 100%; }
   .controls { position: static; order: -1; }
@@ -246,3 +247,31 @@ select { font: inherit; color: inherit; background: #181b21; border: 1px solid v
 .import-table th { color: var(--muted); font-weight: 500; position: sticky; top: 0; background: var(--panel); }
 .import-table tr.reject td { color: var(--err); }
 .import-table tr.delete td { color: var(--stby); }
+
+/* Production logo */
+.production-title { display: flex; align-items: center; gap: 0.6rem; min-width: 0; }
+.production-logo { height: 1.8em; max-width: 6em; object-fit: contain; flex: none; border-radius: 3px; }
+.logo-field { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+.logo-field label { flex: 1; min-width: 200px; }
+.logo-field .production-logo { height: 2.5rem; }
+
+/* Files dialog and script viewer */
+.files { width: min(620px, 100%); }
+.files-empty { margin: 1rem 0; }
+.file-list { list-style: none; margin: 1rem 0; padding: 0; display: grid; gap: 0.75rem; }
+.file-list > li { border-bottom: 1px solid var(--line); padding-bottom: 0.6rem; }
+.file-name { display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; overflow-wrap: anywhere; }
+.file-versions { list-style: none; margin: 0.3rem 0; padding: 0; display: grid; gap: 0.2rem; }
+.file-version { display: flex; align-items: center; gap: 0.4rem; font-size: 0.75rem; }
+.file-version .muted { flex: 1; min-width: 0; }
+.dialog .file-upload select { width: auto; flex: none; }
+.header-actions .on { background: #2a2f37; color: #fff; }
+/* The script goes under the cue list, and beside it once there's room for three columns. */
+.board-body.with-script .script-viewer { grid-column: 1; grid-row: 2; }
+@media (min-width: 1280px) {
+  .board-body.with-script { grid-template-columns: minmax(360px, 1fr) minmax(0, 1.2fr) 300px; }
+  .board-body.with-script .script-viewer { grid-column: auto; grid-row: auto; }
+}
+.script-viewer { min-width: 0; display: grid; grid-template-rows: auto 1fr; height: 70vh; }
+.script-title { font-size: 0.75rem; margin-bottom: 0.4rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.script-viewer iframe { width: 100%; height: 100%; border: 1px solid var(--line); border-radius: 4px; background: var(--panel); }

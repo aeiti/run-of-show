@@ -1,23 +1,29 @@
 import json
+import os
 
-from django.http import HttpResponse, JsonResponse
+from django.db import transaction
+from django.db.models import Max
+from django.http import FileResponse, HttpResponse, JsonResponse
 from django.utils.text import slugify
 from rest_framework import mixins, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from . import backup, csv_io, live, services
+from . import backup, csv_io, live, services, uploads
 from .access import ProductionRole, visible_productions
-from .models import Cue, CueNote, Membership, Production, Run
+from .models import Cue, CueNote, Membership, Production, ProductionFile, Run
 from .serializers import (
     CueEventSerializer,
     CueNoteSerializer,
     CueSerializer,
     CueTargetSerializer,
+    FileUploadSerializer,
     HoldSerializer,
     InviteSerializer,
+    LogoUploadSerializer,
     MembershipSerializer,
     OptionalCueTargetSerializer,
+    ProductionFileSerializer,
     ProductionSerializer,
     RunDetailSerializer,
     RunSerializer,
@@ -71,6 +77,8 @@ class ProductionViewSet(LiveUpdates, viewsets.ModelViewSet):
         "import_cues": "edit",
         "runs": "operate",
         "members": "share",
+        "files": "edit",
+        "logo": "edit",
         # The copy belongs to whoever makes it, and holds nothing they can't
         # already read and export, so any role may duplicate.
         "duplicate": "view",
@@ -83,6 +91,8 @@ class ProductionViewSet(LiveUpdates, viewsets.ModelViewSet):
         "import_cues": "cues",
         "runs": "runs",
         "members": "access",
+        "files": "files",
+        "logo": "production",
     }
 
     def live_message(self, topic, response):
@@ -177,6 +187,55 @@ class ProductionViewSet(LiveUpdates, viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save(production=production)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get", "post"])
+    def files(self, request, pk=None):
+        """Every version of every file, newest version first. POST ``file`` and ``kind``; a kind and name already there adds a version."""
+        production = self.get_object()
+        if request.method == "GET":
+            return Response(ProductionFileSerializer(production.files.select_related("uploaded_by__profile"), many=True).data)
+
+        upload = FileUploadSerializer(data=request.data)
+        upload.is_valid(raise_exception=True)
+        kind, name, file = (upload.validated_data[k] for k in ("kind", "name", "file"))
+        with transaction.atomic():
+            # Lock the production so two uploads of one name can't take the same version.
+            Production.objects.select_for_update().filter(pk=production.pk).first()
+            latest = production.files.filter(kind=kind, name=name).aggregate(v=Max("version"))["v"] or 0
+            created = ProductionFile.objects.create(
+                production=production,
+                kind=kind,
+                name=name,
+                version=latest + 1,
+                file=file,
+                size=file.size,
+                content_type="application/pdf" if kind == ProductionFile.Kind.SCRIPT else uploads.content_type_for(name),
+                uploaded_by=request.user,
+            )
+        return Response(ProductionFileSerializer(created).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get", "put", "delete"])
+    def logo(self, request, pk=None):
+        """GET the image; PUT a new one as ``file`` (replacing any), or DELETE it. Changes return the production."""
+        production = self.get_object()
+        if request.method == "GET":
+            if not production.logo:
+                return Response({"detail": "This production has no logo."}, status=status.HTTP_404_NOT_FOUND)
+            name = f"{slugify(production.name) or 'production'}-logo{os.path.splitext(production.logo.name)[1]}"
+            return stored_file_response(production.logo, name, uploads.content_type_for(production.logo.name))
+
+        if request.method == "PUT":
+            upload = LogoUploadSerializer(data=request.data)
+            upload.is_valid(raise_exception=True)
+        with transaction.atomic():
+            # The old image is deleted once the change commits.
+            uploads.delete_stored(production.logo)
+            if request.method == "PUT":
+                production.logo.save(f"logo.{upload.validated_data['ext']}", upload.validated_data["file"], save=False)
+            else:
+                production.logo = ""
+            production.save(update_fields=["logo"])
+        return Response(ProductionSerializer(production, context={"request": request}).data)
 
     @action(detail=True, methods=["get", "post"])
     def members(self, request, pk=None):
@@ -347,6 +406,25 @@ class CueNoteViewSet(LiveUpdates, mixins.UpdateModelMixin, mixins.DestroyModelMi
         )
 
 
+class ProductionFileViewSet(LiveUpdates, mixins.RetrieveModelMixin, mixins.DestroyModelMixin, viewsets.GenericViewSet):
+    """One version of a file: its details, its contents (``download/``), or delete it. Uploaded through ``/productions/{id}/files/``."""
+
+    serializer_class = ProductionFileSerializer
+    permission_classes = ROLE_PERMISSIONS
+    capabilities = {"destroy": "edit"}
+    live_topics = {"destroy": "files"}
+
+    def get_queryset(self):
+        return ProductionFile.objects.filter(production__in=visible_productions(self.request.user)).select_related(
+            "production", "uploaded_by__profile"
+        )
+
+    @action(detail=True, methods=["get"])
+    def download(self, request, pk=None):
+        f = self.get_object()
+        return stored_file_response(f.file, f.name, f.content_type)
+
+
 class MembershipViewSet(LiveUpdates, mixins.UpdateModelMixin, mixins.DestroyModelMixin, viewsets.GenericViewSet):
     """Change a member's role, or remove them. Anyone may remove themselves (leave)."""
 
@@ -364,6 +442,12 @@ class MembershipViewSet(LiveUpdates, mixins.UpdateModelMixin, mixins.DestroyMode
         if self.action == "destroy" and membership.user_id == request.user.id:
             return
         super().check_object_permissions(request, membership)
+
+
+def stored_file_response(field_file, filename, content_type):
+    # Always an attachment: these come from users, and must never render as a
+    # page on the API's origin. The app fetches them and makes a blob instead.
+    return FileResponse(field_file.open("rb"), as_attachment=True, filename=filename, content_type=content_type)
 
 
 def csv_response(body, filename):
