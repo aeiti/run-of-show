@@ -130,7 +130,7 @@ function HoldControl({ hold, disabled, onAction }) {
   )
 }
 
-function HoldClock({ since }) {
+export function HoldClock({ since }) {
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     const id = setInterval(() => setNow(Date.now()), 1000)
