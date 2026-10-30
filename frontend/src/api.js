@@ -4,11 +4,10 @@ const TOKEN_KEY = 'ros-token'
 export const getToken = () => localStorage.getItem(TOKEN_KEY)
 export const clearToken = () => localStorage.removeItem(TOKEN_KEY)
 
-async function request(path, { method = 'GET', body, raw = false } = {}) {
+async function request(path, { method = 'GET', body, raw = false, token = getToken() } = {}) {
   // FormData (file uploads) sets its own multipart Content-Type.
   const form = body instanceof FormData
   const headers = form ? {} : { 'Content-Type': 'application/json' }
-  const token = getToken()
   if (token) headers.Authorization = `Token ${token}`
   const res = await fetch(`${BASE}${path}`, {
     method,
@@ -57,12 +56,35 @@ function flatten(data) {
     .join(' ')
 }
 
+const setToken = ({ token }) => localStorage.setItem(TOKEN_KEY, token)
+
 export async function login(username, password) {
-  const { token } = await request('/auth/token/', { method: 'POST', body: { username, password } })
-  localStorage.setItem(TOKEN_KEY, token)
+  setToken(await request('/auth/token/', { method: 'POST', body: { username, password } }))
+}
+
+// body: { username, email, password, display_name }
+export async function signup(body) {
+  setToken(await request('/auth/signup/', { method: 'POST', body }))
+}
+
+// Forget the token locally first, so a reload mid-request can't leave it behind.
+export async function logout() {
+  const token = getToken()
+  clearToken()
+  await request('/auth/logout/', { method: 'POST', token }).catch(() => {})
+}
+
+// Changing the password replaces the token (signing out other devices), so keep the new one.
+export async function changePassword(current_password, new_password) {
+  setToken(await request('/auth/password/', { method: 'POST', body: { current_password, new_password } }))
 }
 
 export const api = {
+  me: () => request('/auth/me/'),
+  updateMe: (data) => request('/auth/me/', { method: 'PATCH', body: data }),
+  requestPasswordReset: (email) => request('/auth/password-reset/', { method: 'POST', body: { email } }),
+  confirmPasswordReset: (uid, token, new_password) =>
+    request('/auth/password-reset/confirm/', { method: 'POST', body: { uid, token, new_password } }),
   productions: () => request('/productions/'),
   createProduction: (data) => request('/productions/', { method: 'POST', body: data }),
   production: (id) => request(`/productions/${id}/`),
