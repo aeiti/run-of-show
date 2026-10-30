@@ -6,6 +6,7 @@ import Productions from './Productions'
 import Board from './Board'
 import Signup from './account/Signup'
 import Profile from './account/Profile'
+import Users from './admin/Users'
 import { ForgotPassword, ResetPassword } from './account/PasswordReset'
 
 export default function App() {
@@ -50,6 +51,11 @@ export default function App() {
           RUN<span>/</span>OF<span>/</span>SHOW
         </Link>
         <nav className="account-nav">
+          {me?.is_admin && (
+            <Link className="account-link" to="/users">
+              Users
+            </Link>
+          )}
           {me && (
             <Link className="account-link" to="/profile">
               {me.display_name || me.username}
@@ -63,6 +69,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<ProductionsRoute />} />
         <Route path="/profile" element={me ? <Profile me={me} onSaved={setMe} /> : null} />
+        <Route path="/users" element={!me ? null : me.is_admin ? <Users me={me} /> : <Navigate to="/" replace />} />
         <Route path="/productions/:productionId" element={<BoardRoute me={me} />} />
         <Route path="/productions/:productionId/runs/:runId" element={<BoardRoute me={me} />} />
         {reset}

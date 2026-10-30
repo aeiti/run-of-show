@@ -32,7 +32,7 @@ cp .env.example .env
 .venv/bin/python manage.py runserver
 ```
 
-`seed_demo` creates a local demo user (`demo` / `curtain-up`) and a sample production with ten cues. It is safe to run more than once. Anyone can also create their own account from the sign-in page. For the Django admin, create a superuser with `manage.py createsuperuser`.
+`seed_demo` creates a local demo user (`demo` / `curtain-up`, an app admin) and a sample production with ten cues. It is safe to run more than once. Anyone can also create their own account from the sign-in page. For the Django admin, create a superuser with `manage.py createsuperuser`.
 
 Password reset emails are printed to the `runserver` console in development; the link in them opens the frontend at `FRONTEND_URL`. To send real email, set `EMAIL_BACKEND` and the `EMAIL_*` settings (see `backend/.env.example`).
 
@@ -83,6 +83,9 @@ The schema is in the committed migrations in `backend/shows/migrations/`. `0003`
 | `GET` `PUT` `PATCH` `DELETE` | `/api/productions/{id}/` | One production |
 | `GET` `POST` | `/api/productions/{id}/cues/` | List or add cues |
 | `GET` `PUT` `PATCH` `DELETE` | `/api/cues/{id}/` | One cue |
+| `GET` `POST` | `/api/admin/users/` | Admins: list users (`?q=` searches) or create one |
+| `GET` `PATCH` `DELETE` | `/api/admin/users/{id}/` | Admins: edit, promote, suspend (`is_active: false`) or delete a user |
+| `POST` | `/api/admin/users/{id}/send-reset/` | Admins: email the user a password reset link |
 | `GET` `POST` | `/api/productions/{id}/members/` | The owner and members, or add a member by `user` (username or email) and `role` |
 | `PATCH` `DELETE` | `/api/memberships/{id}/` | Change a member's role, or remove them (anyone can remove themselves) |
 | `GET` `POST` | `/api/productions/{id}/runs/` | List or start runs |
@@ -105,17 +108,19 @@ Every endpoint except sign-in, sign-up and password reset requires authenticatio
 | Operator | ✓ | ✓ | | | |
 | Viewer | ✓ | | | | |
 
+There is one app-wide level on top of that: **admin** (Django's `is_staff`), which can manage users from `/users` and `/api/admin/users/`. Admins don't see other people's productions; that still takes a membership. Suspending a user keeps their account and productions, signs them out everywhere and stops them signing in. Deleting a user is refused while they own productions, since those would go too, and an admin can't suspend, demote or delete themselves.
+
 Each viewset lists the capability every write action needs; an action that isn't listed is refused, so a new write route can't slip through unchecked. Productions carry the requesting user's `role`, and the board only shows the controls that role can use. The server decides which cue is next: it locks the run row for each action, so two GOs at once can't fire the same cue.
 
 **About "append-only":** this is enforced in the application layer, not the database. `CueEvent.save()` refuses to update an existing row, `CueEvent.delete()` raises, the API has no update or delete route for events, and the admin is read-only for them. The database does not block `UPDATE` or `DELETE`, and deleting a production or run cascades through its events. Each event keeps a copy of the cue's number and label, so editing or deleting a cue later does not change the log.
 
 **CSV import** (`backend/shows/csv_io.py`) reads two formats. A simple CSV needs a header row with a `number` column, and may have `label`, `page`, `scene`, `notes`, `time`, `down_time`, `duration` and `follow` (times in seconds or `m:ss`); that is also what export writes, so an export can be edited in a spreadsheet and brought back. An **ETC Eos CSV export** (cues only, or a whole show file) is recognised by its `START_…` sections: cues come from the TARGETS section, one cue list at a time since numbers repeat across lists, part rows are skipped, and label, cue notes, scene text, time, down time, duration and follow are kept. Eos's duration is its own total for the cue, counting delays, discrete times and parts; it is what the board times the cue by, and it is cleared when a cue's time is edited here (in the app or by an import without a duration), since it can't be recomputed without those details. Every import is planned first and shown as a dry run (create, update, unchanged, delete, rejected with a reason), then planned again against the current cue list when it's applied. **Merge** adds and updates but never blanks a field (Eos leaves most labels empty); **replace** makes the file the whole cue list. The Eos reader has been checked against real exports from two shows, the larger a full show file with 10 cue lists, 401 cues in the main list, point cues, part cues, labels, scene text and cue notes; the tests use synthetic fixtures with the same shape.
 
-The tests in `backend/shows/tests.py` cover: actions add events without changing earlier ones; unauthenticated writes get 401; one user cannot see or change another user's data; numeric cue ordering; cue editing and duplicate numbers; GO, BACK, GOTO and RESET at both ends of the list; log entries surviving a cue being renamed or deleted; ended runs; and the data migration rejecting bad cue numbers. `backend/shows/test_access.py` covers each role's capabilities, delete being owner-only, the shared productions list, adding people by username or email, changing roles and leaving. `backend/accounts/tests.py` covers sign-up validation, sign-in and out, profile edits, password change and reset (including single-use links and not revealing which emails have accounts), and rate limiting. `backend/shows/test_csv.py` covers both import formats, merge versus replace, rejected rows, export round trips, run logs surviving a replace import, and owner-only access.
+The tests in `backend/shows/tests.py` cover: actions add events without changing earlier ones; unauthenticated writes get 401; one user cannot see or change another user's data; numeric cue ordering; cue editing and duplicate numbers; GO, BACK, GOTO and RESET at both ends of the list; log entries surviving a cue being renamed or deleted; ended runs; and the data migration rejecting bad cue numbers. `backend/shows/test_access.py` covers each role's capabilities, delete being owner-only, the shared productions list, adding people by username or email, changing roles and leaving. `backend/accounts/test_admin.py` covers user management: admin-only access, search, creating users, suspending and reactivating, promoting, the lock-out guards, refusing to delete an owner, and sending reset links. `backend/accounts/tests.py` covers sign-up validation, sign-in and out, profile edits, password change and reset (including single-use links and not revealing which emails have accounts), and rate limiting. `backend/shows/test_csv.py` covers both import formats, merge versus replace, rejected rows, export round trips, run logs surviving a replace import, and owner-only access.
 
 ## Frontend
 
-Two main screens, with URLs that survive a reload (React Router): the productions list at `/`, and the run-of-show board at `/productions/{id}/runs/{run}` (`frontend/src/Board.jsx`). Signed out, there are pages to sign in, sign up (`/signup`) and reset a password (`/forgot-password`, and `/reset-password/{uid}/{token}` from the email). Signed in, your name in the top bar opens `/profile`, where you change your display name, email and password (`frontend/src/account/`).
+Two main screens, with URLs that survive a reload (React Router): the productions list at `/`, and the run-of-show board at `/productions/{id}/runs/{run}` (`frontend/src/Board.jsx`). Signed out, there are pages to sign in, sign up (`/signup`) and reset a password (`/forgot-password`, and `/reset-password/{uid}/{token}` from the email). Admins get a **Users** link to `/users` (`frontend/src/admin/Users.jsx`). Signed in, your name in the top bar opens `/profile`, where you change your display name, email and password (`frontend/src/account/`).
 
 Running a show (Live mode):
 

@@ -160,7 +160,7 @@ select { font: inherit; color: inherit; background: #181b21; border: 1px solid v
 .log time { color: var(--muted); margin-right: 0.4rem; }
 
 @media (max-width: 760px) {
-  .productions, .board-body { grid-template-columns: 1fr; }
+  .productions, .board-body, .users { grid-template-columns: 1fr; }
   .production-list li { flex-wrap: wrap; justify-content: flex-end; }
   .production-open { flex-basis: 100%; }
   .controls { position: static; order: -1; }
@@ -183,6 +183,21 @@ select { font: inherit; color: inherit; background: #181b21; border: 1px solid v
 .speeds button.on { background: #2a2f37; color: #fff; }
 .scrub { width: 100%; accent-color: var(--stby); margin: 0.2rem 0; }
 .clock { font-size: 0.75rem; text-align: right; margin: 0; font-variant-numeric: tabular-nums; }
+
+/* Users (admin) */
+.users { display: grid; grid-template-columns: 1fr 280px; gap: 1rem; align-items: start; }
+.users-table { width: 100%; border-collapse: collapse; font-size: 0.8rem; }
+.users-table th, .users-table td { text-align: left; padding: 0.45rem 0.5rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+.users-table th { color: var(--muted); font-weight: 500; }
+.users-table tr.suspended td:not(:last-child) { opacity: 0.5; }
+.users-table .actions { display: flex; flex-wrap: wrap; gap: 0.3rem; justify-content: flex-end; }
+.users-table .edit-row td { background: #14171c; }
+.users-search { margin-bottom: 0.75rem; }
+.users-search input { width: 100%; }
+.check { display: flex; align-items: center; gap: 0.5rem; }
+.check input { width: auto; }
+.badge { font-size: 0.68rem; border: 1px solid var(--line); border-radius: 999px; padding: 0.05rem 0.45rem; margin-left: 0.35rem; color: var(--stby); }
+.table-scroll { overflow-x: auto; }
 
 /* People dialog */
 .people { width: min(520px, 100%); }

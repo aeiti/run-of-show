@@ -62,6 +62,91 @@ class MeSerializer(serializers.ModelSerializer):
         return super().update(user, validated_data)
 
 
+class AdminUserSerializer(serializers.ModelSerializer):
+    """A user as an admin manages them. ``is_active`` false means suspended."""
+
+    display_name = serializers.CharField(source="profile.display_name", max_length=100, allow_blank=True, required=False)
+    is_admin = serializers.BooleanField(source="is_staff", required=False)
+    password = serializers.CharField(write_only=True, trim_whitespace=False, required=False)
+    productions_owned = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = User
+        fields = [
+            "id",
+            "username",
+            "email",
+            "display_name",
+            "is_admin",
+            "is_active",
+            "password",
+            "productions_owned",
+            "date_joined",
+            "last_login",
+        ]
+        read_only_fields = ["id", "date_joined", "last_login"]
+        extra_kwargs = {"email": {"required": True}}
+
+    def to_representation(self, user):
+        profile_for(user)
+        return super().to_representation(user)
+
+    def validate_username(self, value):
+        User.username_validator(value)
+        clash = User.objects.filter(username__iexact=value)
+        if self.instance is not None:
+            clash = clash.exclude(pk=self.instance.pk)
+        if clash.exists():
+            raise serializers.ValidationError("That username is taken.")
+        return value
+
+    def validate_email(self, value):
+        return check_email_free(value, self.instance)
+
+    def validate(self, data):
+        if self.instance is None and not data.get("password"):
+            raise serializers.ValidationError({"password": "Set a password for the new account."})
+        if data.get("password"):
+            candidate = self.instance or User(username=data.get("username", ""), email=data.get("email", ""))
+            try:
+                check_password(data["password"], candidate)
+            except serializers.ValidationError as e:
+                raise serializers.ValidationError({"password": e.detail})
+        # An admin can't lock themselves out.
+        me = self.context["request"].user
+        if self.instance is not None and self.instance.pk == me.pk:
+            if data.get("is_staff") is False:
+                raise serializers.ValidationError({"is_admin": "You can't remove your own admin access."})
+            if data.get("is_active") is False:
+                raise serializers.ValidationError({"is_active": "You can't suspend yourself."})
+        return data
+
+    def create(self, data):
+        profile_data = data.pop("profile", {})
+        password = data.pop("password")
+        user = User(**data)
+        user.set_password(password)
+        user.save()
+        self._save_profile(user, profile_data)
+        return user
+
+    def update(self, user, data):
+        profile_data = data.pop("profile", {})
+        password = data.pop("password", None)
+        user = super().update(user, data)
+        if password:
+            user.set_password(password)
+            user.save()
+        self._save_profile(user, profile_data)
+        return user
+
+    def _save_profile(self, user, profile_data):
+        if "display_name" in profile_data:
+            profile = profile_for(user)
+            profile.display_name = profile_data["display_name"]
+            profile.save()
+
+
 class SignupSerializer(serializers.Serializer):
     username = serializers.CharField(max_length=150)
     email = serializers.EmailField()

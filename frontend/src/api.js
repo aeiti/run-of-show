@@ -118,4 +118,10 @@ export const api = {
   importCues: (id, form) => request(`/productions/${id}/cues/import/`, { method: 'POST', body: form }),
   exportCues: (id) => download(`/productions/${id}/cues/export/`),
   exportRun: (runId) => download(`/runs/${runId}/export/`),
+  // Admin only.
+  users: (q = '') => request(`/admin/users/${q ? `?q=${encodeURIComponent(q)}` : ''}`),
+  createUser: (data) => request('/admin/users/', { method: 'POST', body: data }),
+  updateUser: (id, data) => request(`/admin/users/${id}/`, { method: 'PATCH', body: data }),
+  deleteUser: (id) => request(`/admin/users/${id}/`, { method: 'DELETE' }),
+  sendPasswordReset: (id) => request(`/admin/users/${id}/send-reset/`, { method: 'POST' }),
 }
