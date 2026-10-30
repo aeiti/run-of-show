@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import gsap from 'gsap'
 import { useGSAP } from '@gsap/react'
 import { api } from './api'
+import { follow } from './live'
 import CueEditor from './board/CueEditor'
 import FilesDialog from './board/FilesDialog'
 import PeopleDialog from './board/PeopleDialog'
@@ -28,7 +29,7 @@ gsap.ticker.lagSmoothing(0)
 // Each card's .cue-fade bar fills over the cue's time after it goes, so the
 // operator can see when a cue has finished; a later action cuts it off.
 
-export default function Board({ productionId, runId, me, onBack, onSelectRun }) {
+export default function Board({ productionId, runId, me, onBack, onSelectRun, onSignedOut }) {
   const [production, setProduction] = useState(null)
   const [cues, setCues] = useState(null)
   const [runs, setRuns] = useState([])
@@ -41,6 +42,7 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
   const [error, setError] = useState('')
   const [importing, setImporting] = useState(false)
   const [showPeople, setShowPeople] = useState(false)
+  const [liveStatus, setLiveStatus] = useState('connecting')
   const [files, setFiles] = useState([])
   const [showFiles, setShowFiles] = useState(false)
   const [showScript, setShowScript] = useState(false)
@@ -52,6 +54,9 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
   const trackRef = useRef(null)
   const gotoRef = useRef(null)
   const noteRef = useRef(null)
+  // Event ids already on the board. An action can arrive twice, from its own
+  // response and from the live socket (in either order); it plays once.
+  const seenEvents = useRef(new Set())
 
   const cueList = useMemo(() => cues ?? [], [cues])
   const loaded = Boolean(production && cues && run)
@@ -132,7 +137,7 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
       .then((r) => {
         if (cancelled) return
         if (r.production !== productionId) throw new Error('That run belongs to another production.')
-        setRun(r)
+        showRun(r)
         setLoadedCue(null)
         setPlayingBack(false)
       })
@@ -187,6 +192,41 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
     if (loaded && live && !playingBack) applyStates(states, playIdx, 0.4)
   }, [loaded, live, playingBack, states, playIdx, applyStates])
 
+  function showRun(r) {
+    seenEvents.current = new Set(r.events.map((e) => e.id))
+    setRun(r)
+  }
+
+  // Put one event on the board: append it, take the new state, and for a cue
+  // change flash the card and start its fade bar. Ignores an event already shown.
+  const applyEvent = contextSafe((event, state) => {
+    if (seenEvents.current.has(event.id)) return
+    seenEvents.current.add(event.id)
+    // The first GO or GOTO starts the run; the server records the same time.
+    const starts = !run?.started_at && (event.action === 'go' || event.action === 'goto')
+    setRun((prev) => ({
+      ...prev,
+      events: [...prev.events, event],
+      state,
+      ...(starts && { started_at: event.fired_at }),
+    }))
+    if (starts) setRuns((prev) => prev.map((r) => (r.id === event.run ? { ...r, started_at: event.fired_at } : r)))
+    // A hold or resume leaves the cues (and the loaded cue) as they are.
+    if (event.action === 'hold' || event.action === 'resume') return
+    // Someone fired the cue this screen had loaded: nothing left to load.
+    setLoadedCue((current) => (current === state.active_cue ? null : current))
+    if (!live || playingBack) return
+    // The settle effect tweens the states; this adds the flash and the fade bar on top.
+    const index = cueList.findIndex((c) => c.id === state.active_cue)
+    const card = cardRefs.current[index]
+    if (card) {
+      gsap.fromTo(card, { ...FLASH.from }, { ...FLASH.to })
+      const fade = fadeFor(event.action, cueList[index])
+      gsap.fromTo(card.querySelector('.cue-fade'), { scaleX: 0 }, { scaleX: 1, duration: fade, ease: 'none' })
+      card.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+    }
+  })
+
   // GO, BACK, GOTO, RESET, HOLD and RESUME all append one event and return
   // the new state. `arg` is the cue for GOTO and the reason for HOLD.
   // Resolves to whether the action went through.
@@ -200,27 +240,8 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
     try {
       const target = action === 'go' ? (loadedCue ?? undefined) : arg
       const { event, state } = await api[action](run.id, target)
-      // The first GO or GOTO starts the run; the server records the same time.
-      const starts = !run.started_at && (action === 'go' || action === 'goto')
-      setRun((prev) => ({
-        ...prev,
-        events: [...prev.events, event],
-        state,
-        ...(starts && { started_at: event.fired_at }),
-      }))
-      if (starts) setRuns((prev) => prev.map((r) => (r.id === run.id ? { ...r, started_at: event.fired_at } : r)))
-      // A hold or resume leaves the cues (and the loaded cue) as they are.
-      if (action === 'hold' || action === 'resume') return true
-      setLoadedCue(null)
-      // The settle effect tweens the states; this adds the flash and the fade bar on top.
-      const index = cueList.findIndex((c) => c.id === state.active_cue)
-      const card = cardRefs.current[index]
-      if (card) {
-        gsap.fromTo(card, { ...FLASH.from }, { ...FLASH.to })
-        const fade = fadeFor(action, cueList[index])
-        gsap.fromTo(card.querySelector('.cue-fade'), { scaleX: 0 }, { scaleX: 1, duration: fade, ease: 'none' })
-        card.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
-      }
+      applyEvent(event, state)
+      if (action !== 'hold' && action !== 'resume') setLoadedCue(null)
       return true
     } catch (e) {
       setError(e.message)
@@ -299,11 +320,82 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
   async function afterCueChange(nextCues) {
     setCues(sortCues(nextCues))
     try {
-      setRun(await api.run(run.id))
+      showRun(await api.run(run.id))
     } catch (err) {
       setError(err.message)
     }
   }
+
+  // Live updates from other screens (frontend/src/live.js). A ref, so the
+  // socket set up once per production always calls the latest handler.
+  const onLive = useRef(null)
+  onLive.current = async (message) => {
+    const current = run?.id
+    const refreshRun = async () => {
+      if (current == null) return
+      const r = await api.run(current)
+      // Only if the board is still on that run.
+      setRun((prev) => {
+        if (prev?.id !== r.id) return prev
+        seenEvents.current = new Set(r.events.map((e) => e.id))
+        return r
+      })
+    }
+    try {
+      switch (message.type) {
+        case 'run.event':
+          if (message.run === current) applyEvent(message.event, message.state)
+          break
+        case 'runs':
+          setRuns(await api.runs(productionId))
+          if (message.run === current) await refreshRun()
+          break
+        case 'notes':
+          if (message.run === current) await refreshRun()
+          break
+        case 'files':
+          setFiles(await api.files(productionId))
+          break
+        case 'cues':
+          setCues(sortCues(await api.cues(productionId)))
+          await refreshRun()
+          break
+        case 'production':
+        case 'access':
+          // The role may have changed, and with it what this board offers.
+          setProduction(await api.production(productionId))
+          break
+        case 'production.deleted':
+          onBack()
+          break
+        case 'resync': {
+          const [p, c, r] = await Promise.all([api.production(productionId), api.cues(productionId), api.runs(productionId)])
+          setProduction(p)
+          setCues(sortCues(c))
+          setRuns(r)
+          await refreshRun()
+          setFiles(await api.files(productionId))
+          break
+        }
+      }
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  useEffect(
+    () =>
+      follow(productionId, {
+        onMessage: (message) => onLive.current(message),
+        onResync: () => onLive.current({ type: 'resync' }),
+        onStatus: setLiveStatus,
+        onGone: onBack,
+        onSignedOut,
+      }),
+    // One socket per production; the handlers read the latest state through onLive.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [productionId],
+  )
 
   // Desk-style keys. Ignored while typing, except Esc.
   useEffect(() => {
@@ -358,6 +450,17 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun }) 
           onScript={script && (() => setShowScript(!showScript))}
           scriptShown={showScript}
         />
+        <span
+          className={`sync-status ${liveStatus}`}
+          role="status"
+          title={
+            liveStatus === 'live'
+              ? 'Changes from other screens appear here as they happen'
+              : 'Not receiving changes from other screens; this board reloads when it reconnects'
+          }
+        >
+          {liveStatus === 'live' ? 'Synced' : liveStatus === 'connecting' ? 'Connecting…' : 'Reconnecting…'}
+        </span>
         <div className="mode-toggle" role="group" aria-label="Board mode" hidden={!canEdit}>
           <button className={live ? 'on' : ''} aria-pressed={live} onClick={() => setMode('live')}>
             Live

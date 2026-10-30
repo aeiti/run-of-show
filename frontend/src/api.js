@@ -2,6 +2,15 @@ const BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:8000/api'
 const TOKEN_KEY = 'ros-token'
 
 export const getToken = () => localStorage.getItem(TOKEN_KEY)
+
+// The live-update socket for a path such as /ws/productions/3/, on the API's
+// host: http://localhost:8000/api becomes ws://localhost:8000/ws/productions/3/.
+export function socketUrl(path) {
+  const url = new URL(BASE, globalThis.location?.href)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  url.pathname = url.pathname.replace(/\/api\/?$/, '') + path
+  return url.toString()
+}
 export const clearToken = () => localStorage.removeItem(TOKEN_KEY)
 
 async function request(path, { method = 'GET', body, raw = false, token = getToken() } = {}) {
