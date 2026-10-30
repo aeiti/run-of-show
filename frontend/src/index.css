@@ -68,10 +68,18 @@ button.danger:not(.ghost) { background: #2a1214; }
 .mode-toggle button.on { background: #2a2f37; color: #fff; }
 
 /* Playhead track */
-.track { position: relative; height: 34px; border-bottom: 1px solid var(--line); margin-bottom: 1rem; }
+/* Scene names along the top, cue numbers along the bottom; only the numbers
+   that fit are drawn (board/track.js). */
+.track { position: relative; height: 44px; border-bottom: 1px solid var(--line); margin-bottom: 1rem; }
 .track-fill { position: absolute; left: 0; bottom: -1px; height: 3px; width: 0; background: var(--go); }
-.tick { position: absolute; bottom: 8px; transform: translateX(-50%); font-size: 0.65rem; color: var(--muted); }
-.tick::after { content: ''; position: absolute; left: 50%; top: calc(100% + 3px); width: 1px; height: 6px; background: var(--line); }
+.track-scene { position: absolute; top: 0; bottom: 0; border-left: 1px solid color-mix(in srgb, var(--stby) 55%, transparent); }
+.track-scene.alt { background: rgba(255, 255, 255, 0.025); }
+.track-scene span {
+  display: block; padding: 2px 4px 0; font-size: 0.6rem; letter-spacing: 0.1em; text-transform: uppercase;
+  color: var(--stby); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tick { position: absolute; bottom: 0; width: 1px; height: 6px; background: var(--line); }
+.tick-label { position: absolute; bottom: 8px; font-size: 0.65rem; color: var(--muted); white-space: nowrap; }
 .playhead {
   position: absolute; left: 0; top: 0; bottom: -6px; width: 2px; margin-left: -1px;
   background: var(--go); box-shadow: 0 0 10px var(--go);
