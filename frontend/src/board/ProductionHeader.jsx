@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { api } from '../api'
+import { can, ROLES } from '../access'
 
 const FIELDS = ['name', 'company', 'venue', 'performance_date', 'notes']
 
-export default function ProductionHeader({ production, onSaved, onDeleted }) {
+export default function ProductionHeader({ production, onSaved, onDeleted, onPeople }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(null)
   const [confirmName, setConfirmName] = useState(null)
@@ -42,13 +43,25 @@ export default function ProductionHeader({ production, onSaved, onDeleted }) {
       <div className="production-header">
         <div className="row-between">
           <h2>{production.name}</h2>
-          <button className="ghost small" onClick={start}>
-            Edit details
-          </button>
+          <div className="row header-actions">
+            <button className="ghost small" onClick={onPeople}>
+              People
+            </button>
+            {can(production.role, 'edit') && (
+              <button className="ghost small" onClick={start}>
+                Edit details
+              </button>
+            )}
+          </div>
         </div>
         <p className="muted">
           {[production.company, production.venue, production.performance_date].filter(Boolean).join(' · ')}
         </p>
+        {production.role !== 'owner' && (
+          <p className="muted shared-by">
+            {ROLES[production.role]} · shared by {production.owner.display_name || production.owner.username}
+          </p>
+        )}
         {production.notes && <p className="production-notes">{production.notes}</p>}
       </div>
     )
@@ -86,7 +99,7 @@ export default function ProductionHeader({ production, onSaved, onDeleted }) {
           Cancel
         </button>
         <span className="spacer" />
-        {confirmName === null ? (
+        {!can(production.role, 'delete') ? null : confirmName === null ? (
           <button type="button" className="ghost danger" onClick={() => setConfirmName('')}>
             Delete production…
           </button>

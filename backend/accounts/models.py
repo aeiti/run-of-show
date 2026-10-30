@@ -21,3 +21,11 @@ class Profile(models.Model):
 
 def profile_for(user):
     return Profile.objects.get_or_create(user=user)[0]
+
+
+def display_name(user):
+    """The user's display name, or "" when they haven't set one (or have no profile yet)."""
+    try:
+        return user.profile.display_name
+    except Profile.DoesNotExist:
+        return ""

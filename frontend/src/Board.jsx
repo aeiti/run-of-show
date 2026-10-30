@@ -3,6 +3,8 @@ import gsap from 'gsap'
 import { useGSAP } from '@gsap/react'
 import { api } from './api'
 import CueEditor from './board/CueEditor'
+import PeopleDialog from './board/PeopleDialog'
+import { can } from './access'
 import ImportDialog from './board/ImportDialog'
 import ProductionHeader from './board/ProductionHeader'
 import Playback from './board/Playback'
@@ -23,7 +25,7 @@ gsap.ticker.lagSmoothing(0)
 // Each card's .cue-fade bar fills over the cue's time after it goes, so the
 // operator can see when a cue has finished; a later action cuts it off.
 
-export default function Board({ productionId, runId, onBack, onSelectRun }) {
+export default function Board({ productionId, runId, me, onBack, onSelectRun }) {
   const [production, setProduction] = useState(null)
   const [cues, setCues] = useState(null)
   const [runs, setRuns] = useState([])
@@ -35,6 +37,7 @@ export default function Board({ productionId, runId, onBack, onSelectRun }) {
   const [playingBack, setPlayingBack] = useState(false)
   const [error, setError] = useState('')
   const [importing, setImporting] = useState(false)
+  const [showPeople, setShowPeople] = useState(false)
 
   const scope = useRef(null)
   const cardRefs = useRef([])
@@ -47,6 +50,9 @@ export default function Board({ productionId, runId, onBack, onSelectRun }) {
   const loaded = Boolean(production && cues && run)
   const live = mode === 'live'
   const ended = Boolean(run?.ended_at)
+  // What this user's role on the production allows; the server checks it too.
+  const canOperate = can(production?.role, 'operate')
+  const canEdit = can(production?.role, 'edit')
 
   // The server decides the active and next cue; the board looks them up and
   // overlays the operator's loaded cue, which only exists on this screen.
@@ -78,8 +84,8 @@ export default function Board({ productionId, runId, onBack, onSelectRun }) {
         setProduction(p)
         setCues(c)
         setRuns(r)
-        // No run in the URL: open the latest one, or start "Run 1".
-        if (!runId) {
+        // No run in the URL: open the latest one, or start "Run 1" if allowed to.
+        if (!runId && (r.length || can(p.role, 'operate'))) {
           const target = r[0] ?? (await api.createRun(productionId, { label: 'Run 1' }))
           if (!r.length) setRuns([target])
           onSelectRun(target.id, { replace: true })
@@ -158,7 +164,7 @@ export default function Board({ productionId, runId, onBack, onSelectRun }) {
 
   // GO, BACK, GOTO and RESET all append one event and return the new state.
   const act = contextSafe(async (action, cueId) => {
-    if (!live || busy || playingBack || !run || ended) return
+    if (!live || busy || playingBack || !run || ended || !canOperate) return
     if (action === 'go' && !nextCue) return
     setBusy(true)
     setError('')
@@ -263,8 +269,13 @@ export default function Board({ productionId, runId, onBack, onSelectRun }) {
         <button className="ghost" onClick={onBack}>
           ← Productions
         </button>
-        <ProductionHeader production={production} onSaved={setProduction} onDeleted={onBack} />
-        <div className="mode-toggle" role="group" aria-label="Board mode">
+        <ProductionHeader
+          production={production}
+          onSaved={setProduction}
+          onDeleted={onBack}
+          onPeople={() => setShowPeople(true)}
+        />
+        <div className="mode-toggle" role="group" aria-label="Board mode" hidden={!canEdit}>
           <button className={live ? 'on' : ''} aria-pressed={live} onClick={() => setMode('live')}>
             Live
           </button>
@@ -332,7 +343,9 @@ export default function Board({ productionId, runId, onBack, onSelectRun }) {
                 </button>
               </li>,
             ])}
-            {cues && cues.length === 0 && <li className="muted">No cues yet. Switch to Edit to add some.</li>}
+            {cues && cues.length === 0 && (
+              <li className="muted">{canEdit ? 'No cues yet. Switch to Edit to add some.' : 'No cues yet.'}</li>
+            )}
           </ol>
         ) : (
           <div className="edit-pane">
@@ -361,7 +374,7 @@ export default function Board({ productionId, runId, onBack, onSelectRun }) {
           {live ? (
             <>
               <Transport
-                disabled={busy || playingBack || !run || ended}
+                disabled={busy || playingBack || !run || ended || !canOperate}
                 goLabel={goLabel}
                 canGo={Boolean(nextCue)}
                 canBack={canBack}
@@ -394,6 +407,7 @@ export default function Board({ productionId, runId, onBack, onSelectRun }) {
           <RunPanel
             runs={runs}
             run={run}
+            canOperate={canOperate}
             onSelect={onSelectRun}
             onCreate={createRun}
             onEnd={endRun}
@@ -402,6 +416,9 @@ export default function Board({ productionId, runId, onBack, onSelectRun }) {
           {error && <p className="error">{error}</p>}
         </aside>
       </div>
+      {showPeople && (
+        <PeopleDialog production={production} me={me} onClose={() => setShowPeople(false)} onLeft={onBack} />
+      )}
       {importing && (
         <ImportDialog
           productionId={productionId}

@@ -1,18 +1,20 @@
 import json
 
 from django.http import HttpResponse, JsonResponse
-from django.shortcuts import get_object_or_404
 from django.utils.text import slugify
-from rest_framework import mixins, status, viewsets
+from rest_framework import mixins, permissions, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from . import backup, csv_io, services
-from .models import Cue, Production, Run
+from .access import ProductionRole, visible_productions
+from .models import Cue, Membership, Run
 from .serializers import (
     CueEventSerializer,
     CueSerializer,
     CueTargetSerializer,
+    InviteSerializer,
+    MembershipSerializer,
     OptionalCueTargetSerializer,
     ProductionSerializer,
     RunDetailSerializer,
@@ -21,12 +23,28 @@ from .serializers import (
 )
 
 
+ROLE_PERMISSIONS = [permissions.IsAuthenticated, ProductionRole]
+
+
 class ProductionViewSet(viewsets.ModelViewSet):
     serializer_class = ProductionSerializer
+    permission_classes = ROLE_PERMISSIONS
+    capabilities = {
+        "update": "edit",
+        "partial_update": "edit",
+        "destroy": "delete",
+        "cues": "edit",
+        "import_cues": "edit",
+        "runs": "operate",
+        "members": "share",
+        # The copy belongs to whoever makes it, and holds nothing they can't
+        # already read and export, so any role may duplicate.
+        "duplicate": "view",
+    }
 
     def get_queryset(self):
-        # Tenant isolation: another user's production is a 404, not a 403.
-        return Production.objects.filter(owner=self.request.user)
+        # Tenant isolation: a production you're not on is a 404, not a 403.
+        return visible_productions(self.request.user).select_related("owner__profile")
 
     def perform_create(self, serializer):
         serializer.save(owner=self.request.user)
@@ -38,7 +56,7 @@ class ProductionViewSet(viewsets.ModelViewSet):
         details = ProductionSerializer(data=request.data, partial=True)
         details.is_valid(raise_exception=True)
         copy = backup.duplicate(production, request.user, **details.validated_data)
-        return Response(ProductionSerializer(copy).data, status=status.HTTP_201_CREATED)
+        return Response(ProductionSerializer(copy, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get"])
     def export(self, request, pk=None):
@@ -59,7 +77,7 @@ class ProductionViewSet(viewsets.ModelViewSet):
         else:
             data = request.data
         production = backup.import_production(request.user, backup.validate(data))
-        return Response(ProductionSerializer(production).data, status=status.HTTP_201_CREATED)
+        return Response(ProductionSerializer(production, context={"request": request}).data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get", "post"])
     def cues(self, request, pk=None):
@@ -111,6 +129,24 @@ class ProductionViewSet(viewsets.ModelViewSet):
         serializer.save(production=production)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
+    @action(detail=True, methods=["get", "post"])
+    def members(self, request, pk=None):
+        """Everyone on the production, owner first. POST adds a member by ``user`` (username or email) and ``role``."""
+        production = self.get_object()
+        if request.method == "GET":
+            members = production.memberships.select_related("user__profile")
+            return Response(
+                {
+                    "owner": ProductionSerializer(production, context={"request": request}).data["owner"],
+                    "members": MembershipSerializer(members, many=True).data,
+                }
+            )
+
+        invite = InviteSerializer(data=request.data, context={"production": production})
+        invite.is_valid(raise_exception=True)
+        membership = Membership.objects.create(production=production, **invite.validated_data)
+        return Response(MembershipSerializer(membership).data, status=status.HTTP_201_CREATED)
+
 
 class CueViewSet(
     mixins.RetrieveModelMixin,
@@ -119,16 +155,29 @@ class CueViewSet(
     viewsets.GenericViewSet,
 ):
     serializer_class = CueSerializer
+    permission_classes = ROLE_PERMISSIONS
+    capabilities = {"update": "edit", "partial_update": "edit", "destroy": "edit"}
 
     def get_queryset(self):
-        return Cue.objects.filter(production__owner=self.request.user)
+        return Cue.objects.filter(production__in=visible_productions(self.request.user))
 
 
 class RunViewSet(mixins.RetrieveModelMixin, mixins.UpdateModelMixin, viewsets.GenericViewSet):
     """Runs are history, so there is no delete. Operator actions append events."""
 
+    permission_classes = ROLE_PERMISSIONS
+    capabilities = {
+        "update": "operate",
+        "partial_update": "operate",
+        "go": "operate",
+        "back": "operate",
+        "goto": "operate",
+        "reset": "operate",
+        "end": "operate",
+    }
+
     def get_queryset(self):
-        return Run.objects.filter(production__owner=self.request.user).prefetch_related("events")
+        return Run.objects.filter(production__in=visible_productions(self.request.user)).prefetch_related("events")
 
     def get_serializer_class(self):
         return RunDetailSerializer if self.action == "retrieve" else RunSerializer
@@ -143,7 +192,7 @@ class RunViewSet(mixins.RetrieveModelMixin, mixins.UpdateModelMixin, viewsets.Ge
         )
 
     def _act(self, request, pk, fn, target_serializer=None):
-        run = get_object_or_404(self.get_queryset(), pk=pk)
+        run = self.get_object()
         kwargs = {}
         if target_serializer is not None:
             target = target_serializer(data=request.data)
@@ -174,14 +223,32 @@ class RunViewSet(mixins.RetrieveModelMixin, mixins.UpdateModelMixin, viewsets.Ge
 
     @action(detail=True, methods=["get"])
     def export(self, request, pk=None):
-        run = get_object_or_404(self.get_queryset(), pk=pk)
+        run = self.get_object()
         name = f"{slugify(run.production.name)}-{slugify(run.label)}-log.csv"
         return csv_response(csv_io.export_run(run), name)
 
     @action(detail=True, methods=["post"])
     def end(self, request, pk=None):
-        run = get_object_or_404(self.get_queryset(), pk=pk)
+        run = self.get_object()
         return Response(RunSerializer(services.end(run)).data)
+
+
+class MembershipViewSet(mixins.UpdateModelMixin, mixins.DestroyModelMixin, viewsets.GenericViewSet):
+    """Change a member's role, or remove them. Anyone may remove themselves (leave)."""
+
+    serializer_class = MembershipSerializer
+    permission_classes = ROLE_PERMISSIONS
+    capabilities = {"update": "share", "partial_update": "share", "destroy": "share"}
+
+    def get_queryset(self):
+        return Membership.objects.filter(production__in=visible_productions(self.request.user)).select_related(
+            "production", "user__profile"
+        )
+
+    def check_object_permissions(self, request, membership):
+        if self.action == "destroy" and membership.user_id == request.user.id:
+            return
+        super().check_object_permissions(request, membership)
 
 
 def csv_response(body, filename):

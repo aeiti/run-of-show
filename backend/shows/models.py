@@ -21,6 +21,33 @@ class Production(models.Model):
         return self.name
 
 
+class Membership(models.Model):
+    """Someone other than the owner who works on a production, and in what role.
+
+    The owner is not a member: ``Production.owner`` is the one person who can
+    delete the production. What each role may do is in ``access.py``.
+    """
+
+    class Role(models.TextChoices):
+        STAGE_MANAGER = "stage_manager", "Stage manager"
+        OPERATOR = "operator", "Operator"
+        VIEWER = "viewer", "Viewer"
+
+    production = models.ForeignKey(Production, on_delete=models.CASCADE, related_name="memberships")
+    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="memberships")
+    role = models.CharField(max_length=20, choices=Role.choices, default=Role.VIEWER)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["created_at", "id"]
+        constraints = [
+            models.UniqueConstraint(fields=["production", "user"], name="unique_membership"),
+        ]
+
+    def __str__(self):
+        return f"{self.user} on {self.production} ({self.role})"
+
+
 FOLLOW_VALIDATOR = RegexValidator(
     r"^[FH]\d{1,5}(\.\d{1,2})?$", "Follow is F or H and a time in seconds, such as F2 or H0.5."
 )

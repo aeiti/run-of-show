@@ -1,7 +1,12 @@
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db.models import Q
 from rest_framework import serializers
 
-from .models import FOLLOW_VALIDATOR, Cue, CueEvent, Production, Run, format_number
+from accounts.models import display_name
+
+from .access import role_for
+from .models import FOLLOW_VALIDATOR, Cue, CueEvent, Membership, Production, Run, format_number
 from .services import run_state
 
 
@@ -31,11 +36,60 @@ class SecondsField(serializers.DecimalField):
         return format_number(value)
 
 
+class PersonSerializer(serializers.Serializer):
+    """Another user as collaborators see them: no email."""
+
+    id = serializers.IntegerField()
+    username = serializers.CharField()
+    display_name = serializers.SerializerMethodField()
+
+    def get_display_name(self, user):
+        return display_name(user)
+
+
 class ProductionSerializer(serializers.ModelSerializer):
+    owner = PersonSerializer(read_only=True)
+    # The requesting user's role, so the UI can show only what they may do.
+    role = serializers.SerializerMethodField()
+
     class Meta:
         model = Production
-        fields = ["id", "name", "company", "venue", "performance_date", "notes", "created_at"]
+        fields = ["id", "name", "company", "venue", "performance_date", "notes", "created_at", "owner", "role"]
         read_only_fields = ["id", "created_at"]
+
+    def get_role(self, production):
+        return role_for(production, self.context["request"].user)
+
+
+class MembershipSerializer(serializers.ModelSerializer):
+    user = PersonSerializer(read_only=True)
+
+    class Meta:
+        model = Membership
+        fields = ["id", "user", "role", "created_at"]
+        read_only_fields = ["id", "user", "created_at"]
+
+
+class InviteSerializer(serializers.Serializer):
+    """Add an existing account to a production, found by username or email."""
+
+    user = serializers.CharField()
+    role = serializers.ChoiceField(Membership.Role.choices, default=Membership.Role.VIEWER)
+
+    def validate_user(self, value):
+        value = value.strip()
+        users = get_user_model().objects.filter(Q(username__iexact=value) | Q(email__iexact=value), is_active=True)
+        # Two accounts could share an email only if one predates the unique
+        # check at sign-up; don't guess between them.
+        if users.count() != 1:
+            raise serializers.ValidationError("No single account has that username or email.")
+        user = users.get()
+        production = self.context["production"]
+        if user.pk == production.owner_id:
+            raise serializers.ValidationError(f"{user.username} owns this production.")
+        if production.memberships.filter(user=user).exists():
+            raise serializers.ValidationError(f"{user.username} is already on this production.")
+        return user
 
 
 class CueSerializer(serializers.ModelSerializer):
@@ -137,8 +191,11 @@ BACKUP_FORMAT = "run-of-show/production"
 BACKUP_VERSION = 1
 
 
-class BackupProductionSerializer(ProductionSerializer):
-    class Meta(ProductionSerializer.Meta):
+class BackupProductionSerializer(serializers.ModelSerializer):
+    # Not a ProductionSerializer subclass: its owner and role belong to whoever
+    # is asking, not to the production file.
+    class Meta:
+        model = Production
         fields = ["name", "company", "venue", "performance_date", "notes"]
 
 

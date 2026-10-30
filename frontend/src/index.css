@@ -184,6 +184,17 @@ select { font: inherit; color: inherit; background: #181b21; border: 1px solid v
 .scrub { width: 100%; accent-color: var(--stby); margin: 0.2rem 0; }
 .clock { font-size: 0.75rem; text-align: right; margin: 0; font-variant-numeric: tabular-nums; }
 
+/* People dialog */
+.people { width: min(520px, 100%); }
+.people-list { list-style: none; margin: 1rem 0; padding: 0; display: grid; gap: 0.4rem; }
+.people-list li { display: flex; align-items: center; gap: 0.6rem; font-size: 0.85rem; }
+.people-list .person { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.dialog.people select { width: auto; flex: none; }
+.header-actions { margin: 0; flex-shrink: 0; }
+.shared-by { font-size: 0.75rem; margin-top: 0.2rem; }
+.shared-badge { display: block; color: var(--stby); font-size: 0.72rem; margin-top: 0.2rem; }
+.mode-toggle[hidden] { display: none; }
+
 /* Import dialog */
 .edit-pane { min-width: 0; }
 .edit-tools { margin-bottom: 0.6rem; }
