@@ -71,6 +71,27 @@ def test_login_and_logout(alice):
 
 
 @pytest.mark.django_db
+def test_login_ignores_the_case_of_the_username(alice):
+    client = APIClient()
+    assert client.post("/api/auth/token/", {"username": "ALICE", "password": PASSWORD}).status_code == 200
+    assert client.post("/api/auth/token/", {"username": "Alice", "password": "wrong"}).status_code == 400
+    alice.is_active = False
+    alice.save()
+    assert client.post("/api/auth/token/", {"username": "Alice", "password": PASSWORD}).status_code == 400
+
+
+@pytest.mark.django_db
+def test_login_with_clashing_older_usernames_needs_the_exact_spelling(alice):
+    # Sign-up refuses these now, but accounts made before that may exist.
+    User.objects.create_user(username="Alice", password=PASSWORD)
+    client = APIClient()
+    for spelling in ("alice", "Alice"):
+        token = client.post("/api/auth/token/", {"username": spelling, "password": PASSWORD}).data["token"]
+        assert Token.objects.get(key=token).user.username == spelling
+    assert client.post("/api/auth/token/", {"username": "ALICE", "password": PASSWORD}).status_code == 400
+
+
+@pytest.mark.django_db
 def test_profile_update_merges_preferences_and_guards_email(alice):
     User.objects.create_user(username="carol", email="carol@example.com", password=PASSWORD)
     client = signed_in(alice)
