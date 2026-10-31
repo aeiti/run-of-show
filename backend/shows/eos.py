@@ -211,16 +211,22 @@ def log_console_event(production_id, kind, text, address=""):
 
 
 class Repeats:
-    """Recognises the same event arriving again within ``REPEAT_WINDOW``."""
+    """Recognises an event arriving again within ``REPEAT_WINDOW``.
+
+    Remembers every address seen in the window, not just the last: Eos sends
+    other messages between the two copies of a fire.
+    """
 
     def __init__(self, clock=time.monotonic):
         self.clock = clock
-        self.last = None  # (address, when)
+        self.seen_at = {}  # address -> when
 
     def seen(self, address):
         now = self.clock()
-        repeat = self.last is not None and self.last[0] == address.lower() and now - self.last[1] < REPEAT_WINDOW
-        self.last = (address.lower(), now)
+        self.seen_at = {a: t for a, t in self.seen_at.items() if now - t < REPEAT_WINDOW}
+        key = address.lower()
+        repeat = key in self.seen_at
+        self.seen_at[key] = now
         return repeat
 
 
