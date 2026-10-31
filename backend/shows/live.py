@@ -11,6 +11,8 @@ sends the group one small message:
 * ``access``: membership changed. Each socket rechecks its user's access and
   closes if it's gone; boards refetch the production, since the role may differ.
 * ``production.deleted``: boards leave.
+* ``console``: the Eos console listener's status changed (see ``console.py``),
+  sent with the new status.
 
 Each user also has a group, used to close their sockets when their sign-in
 ends (sign-out, a password change or reset, suspension, deletion).
@@ -42,6 +44,13 @@ def _send(group, message):
 
 def broadcast(production_id, message):
     _send(production_group(production_id), {"type": "production.message", "message": message})
+
+
+async def broadcast_now(production_id, message):
+    """``broadcast`` from async code with nothing to commit, such as a console listener's status."""
+    layer = get_channel_layer()
+    if layer is not None:
+        await layer.group_send(production_group(production_id), {"type": "production.message", "message": message})
 
 
 def end_sessions(user_id):

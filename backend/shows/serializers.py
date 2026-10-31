@@ -16,6 +16,7 @@ from .models import (
     FOLLOW_VALIDATOR,
     Cue,
     CueEvent,
+    EosConsole,
     CueNote,
     Membership,
     Production,
@@ -102,6 +103,28 @@ class ProductionSerializer(serializers.ModelSerializer):
 
     def get_logo(self, production):
         return os.path.basename(production.logo.name) if production.logo else None
+
+
+class EosConsoleSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = EosConsole
+        fields = ["enabled", "transport", "port", "host", "framing", "cue_list", "updated_at"]
+        read_only_fields = ["updated_at"]
+        # The port check is in validate(), with a message that says what to do.
+        validators = []
+
+    def validate(self, data):
+        merged = {f: getattr(self.instance, f) for f in self.Meta.fields if self.instance} | data
+        if merged.get("transport") == EosConsole.Transport.TCP and not merged.get("host", "").strip():
+            raise serializers.ValidationError({"host": "Give the console's IP address to connect to it over TCP."})
+        if merged.get("enabled") and merged.get("transport", EosConsole.Transport.UDP) == EosConsole.Transport.UDP:
+            taken = EosConsole.objects.filter(enabled=True, transport=EosConsole.Transport.UDP, port=merged.get("port", 4703))
+            other = taken.exclude(production=self.context["production"]).select_related("production").first()
+            if other:
+                raise serializers.ValidationError(
+                    {"port": f"{other.production.name} is already listening on UDP port {other.port}. Pick another port."}
+                )
+        return data
 
 
 def check_logo(head, size):

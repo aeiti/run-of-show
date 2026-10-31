@@ -3,7 +3,7 @@ import re
 import uuid
 
 from django.conf import settings
-from django.core.validators import RegexValidator
+from django.core.validators import MaxValueValidator, MinValueValidator, RegexValidator
 from django.db import models
 from django.db.models.signals import post_delete
 from django.dispatch import receiver
@@ -51,6 +51,46 @@ class Production(models.Model):
 @receiver(post_delete, sender=Production)
 def delete_production_logo(sender, instance, **kwargs):
     delete_stored(instance.logo)
+
+
+class EosConsole(models.Model):
+    """An ETC Eos console this production follows over OSC (see ``console.py``).
+
+    While it is enabled, the server listens and records each cue the console
+    fires on the production's open run. Nothing is ever sent to the console.
+    """
+
+    class Transport(models.TextChoices):
+        UDP = "udp", "UDP"
+        TCP = "tcp", "TCP"
+
+    class Framing(models.TextChoices):
+        OSC_10 = "1.0", "OSC 1.0 (length headers)"
+        OSC_11 = "1.1", "OSC 1.1 (SLIP)"
+
+    production = models.OneToOneField(Production, on_delete=models.CASCADE, primary_key=True, related_name="eos_console")
+    enabled = models.BooleanField(default=False)
+    # UDP: the console sends to this server on ``port``. TCP: the server connects
+    # to the console at ``host``:``port`` and reads.
+    transport = models.CharField(max_length=3, choices=Transport.choices, default=Transport.UDP)
+    port = models.PositiveIntegerField(default=4703, validators=[MinValueValidator(1), MaxValueValidator(65535)])
+    host = models.CharField(max_length=255, blank=True)
+    framing = models.CharField(max_length=3, choices=Framing.choices, default=Framing.OSC_10)
+    cue_list = models.PositiveIntegerField(default=1, validators=[MinValueValidator(1)])
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        constraints = [
+            # Eos's messages don't say which show they're for, so a UDP port belongs to one production.
+            models.UniqueConstraint(
+                fields=["port"],
+                condition=models.Q(enabled=True, transport="udp"),
+                name="unique_enabled_udp_port",
+            ),
+        ]
+
+    def __str__(self):
+        return f"Eos console for {self.production}"
 
 
 class Membership(models.Model):

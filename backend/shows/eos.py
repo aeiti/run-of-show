@@ -7,10 +7,9 @@ Dictionary > OSC Outputs). Over UDP it sends them to the OSC TX IP address and
 port set on the console; over TCP to whoever has connected to its OSC port,
 framed by a length header (OSC 1.0, the console's default) or SLIP (OSC 1.1).
 
-This module parses those bytes and decides what each fire means for the
-production's open run. ``listen_eos`` does the networking, and records the
-cue through the app's API so every open board updates as if an operator had
-pressed GO.
+This module parses those bytes and records what each fire means on the
+production's open run, telling open boards just as a GO from a board does.
+``console.py`` does the networking, inside the server process.
 """
 
 import re
@@ -18,8 +17,9 @@ import struct
 import time
 from decimal import Decimal, InvalidOperation
 
+from . import live, services
 from .models import Cue, Run
-from .services import active_number
+from .serializers import CueEventSerializer, RunStateSerializer
 
 CUE_EVENT = re.compile(r"^/eos/out/event/cue/(?P<list>\d+)/(?P<number>[0-9.]+)/(?P<action>fire|stop|resume)$", re.I)
 
@@ -158,7 +158,7 @@ def plan(production, number):
     cue = Cue.objects.filter(production=production, number=number).first()
     if cue is None:
         raise Skip(f"Q{number.normalize():f} isn't in this production's cue list.")
-    active = active_number(run)
+    active = services.active_number(run)
     action = "goto" if active is not None and number <= active else "go"
     return run, action, cue
 
@@ -178,25 +178,24 @@ class Repeats:
 
 
 class Relay:
-    """Turns OSC packets from the console into GO and GOTO requests on the open run.
+    """Records the cue fires in OSC packets from the console on the production's open run.
 
-    ``post(path, body)`` sends one request to the app's API as the console's
-    account and returns ``(status, data)``; ``log(text)`` reports what happened.
+    ``log(text, problem)`` reports each fire recorded, or skipped (``problem`` true). Runs synchronously,
+    with database access; the caller keeps packets in order.
     """
 
-    def __init__(self, production, cue_list, post, log, clock=time.monotonic):
-        self.production = production
+    def __init__(self, production_id, cue_list, log, clock=time.monotonic):
+        self.production_id = production_id
         self.cue_list = cue_list
-        self.post = post
         self.log = log
         self.repeats = Repeats(clock)
 
     def handle(self, data):
+        """Record any cue fires in ``data``. False if it wasn't OSC."""
         try:
             messages = parse_packet(data)
-        except OSCError as e:
-            self.log(f"Ignored {len(data)} bytes: {e}")
-            return
+        except OSCError:
+            return False
         for address, _args in messages:
             fire = cue_fire(address)
             if fire is None or fire[0] != self.cue_list:
@@ -204,17 +203,24 @@ class Relay:
             if self.repeats.seen(*fire):
                 continue
             self.record(fire[1])
+        return True
 
     def record(self, number):
         name = f"Q{number.normalize():f}"
         try:
-            run, action, cue = plan(self.production, number)
-        except Skip as e:
-            self.log(f"Console fired {name}; not recorded. {e}")
+            run, action, cue = plan(self.production_id, number)
+            event = (services.go if action == "go" else services.goto)(run, cue.id)
+        except (Skip, services.RunActionError) as e:
+            self.log(f"Console fired {name}; not recorded. {e}", True)
             return
-        status, data = self.post(f"runs/{run.id}/{action}/", {"cue": cue.id})
-        if 200 <= status < 300:
-            self.log(f"Console fired {name}: {action.upper()} {name} {cue.label}".rstrip())
-        else:
-            detail = data.get("detail") if isinstance(data, dict) else None
-            self.log(f"Console fired {name}; not recorded. {detail or f'The app answered {status}.'}")
+        # The same message the API sends for a GO from a board (see RunViewSet.live_message).
+        live.broadcast(
+            self.production_id,
+            {
+                "type": "run.event",
+                "run": run.id,
+                "event": CueEventSerializer(event).data,
+                "state": RunStateSerializer(services.run_state(run)).data,
+            },
+        )
+        self.log(f"Console fired {name}: {action.upper()} {name} {cue.label}".rstrip(), False)

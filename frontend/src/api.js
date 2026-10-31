@@ -128,6 +128,9 @@ export const api = {
   updateCue: (cueId, data) => request(`/cues/${cueId}/`, { method: 'PATCH', body: data }),
   deleteCue: (cueId) => request(`/cues/${cueId}/`, { method: 'DELETE' }),
   // { owner, members: [{ id, user, role }] }
+  // Eos console settings and the listener's status; saving restarts the listener.
+  console: (id) => request(`/productions/${id}/console/`),
+  saveConsole: (id, data) => request(`/productions/${id}/console/`, { method: 'PUT', body: data }),
   members: (id) => request(`/productions/${id}/members/`),
   // user is a username or email.
   addMember: (id, user, role) => request(`/productions/${id}/members/`, { method: 'POST', body: { user, role } }),
