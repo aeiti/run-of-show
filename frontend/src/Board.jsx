@@ -204,6 +204,25 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
     if (loaded && live && !playingBack) applyStates(states, playIdx, 0.4)
   }, [loaded, live, playingBack, states, playIdx, applyStates])
 
+  // On opening a run (or switching back to Live), scroll the cue list to the
+  // live cue, or the next one if nothing is live yet. Only the list scrolls,
+  // not the page, so the header and controls stay where they are.
+  const scrolledTo = useRef(null)
+  useEffect(() => {
+    if (!loaded || !live) {
+      scrolledTo.current = null
+      return
+    }
+    if (scrolledTo.current === run.id) return
+    scrolledTo.current = run.id
+    const target = run.state.active_cue ?? run.state.next_cue
+    const card = cardRefs.current[cueList.findIndex((c) => c.id === target)]
+    const list = card?.closest('.cue-list')
+    if (!list) return
+    const offset = card.getBoundingClientRect().top - list.getBoundingClientRect().top
+    list.scrollTop += offset - (list.clientHeight - card.offsetHeight) / 2
+  }, [loaded, live, run, cueList])
+
   function showRun(r) {
     seenEvents.current = new Set(r.events.map((e) => e.id))
     setRun(r)
