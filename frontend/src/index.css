@@ -104,7 +104,8 @@ button.danger:not(.ghost) { background: #2a1214; }
 }
 
 .board-body { display: grid; grid-template-columns: 1fr 300px; gap: 1rem; align-items: start; }
-.cue-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; max-height: 70vh; overflow-y: auto; overflow-x: hidden; padding: 8px; }
+/* Extra room on the right: the active cue is drawn 2% larger and would touch the scrollbar. */
+.cue-list { list-style: none; margin: 0; display: grid; gap: 0.4rem; max-height: 70vh; overflow-y: auto; overflow-x: hidden; padding: 8px 18px 8px 10px; }
 .cue-inner {
   width: 100%; text-align: left; cursor: pointer; font: inherit; color: inherit;
   display: grid; grid-template-columns: 4.5rem 1fr 5.5rem 3rem 3.5rem; align-items: center; gap: 0.75rem;
@@ -148,7 +149,8 @@ button.danger:not(.ghost) { background: #2a1214; }
 .cue-status { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.12em; text-align: right; }
 .is-playing-back .cue-status { visibility: hidden; }
 
-.controls { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 1rem; position: sticky; top: 1rem; }
+/* Never scrolls sideways; the transport row below is sized to fit its width. */
+.controls { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 1rem; position: sticky; top: 1rem; overflow-x: hidden; }
 .go {
   width: 100%; padding: 1.4rem; font-size: 2rem; font-weight: 800; letter-spacing: 0.2em;
   background: #0d3324; border-color: var(--go); color: var(--go);
@@ -159,7 +161,11 @@ button.danger:not(.ghost) { background: #2a1214; }
 .row input { flex: 1; min-width: 0; }
 .row .narrow { flex: 0 0 3.2rem; }
 .controls > .ghost, .wide { width: 100%; }
-.transport-row { display: grid; grid-template-columns: auto 1fr auto; gap: 0.4rem; margin-bottom: 0.4rem; }
+/* BACK, the GOTO box and RESET are the widest thing in the controls: tighter
+   padding and a box that can shrink keep them inside the column with wider fonts. */
+.transport-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0.3rem; margin-bottom: 0.4rem; }
+.transport-row button { padding-left: 0.5rem; padding-right: 0.5rem; }
+.goto button { flex: none; }
 .goto { display: flex; gap: 0.3rem; min-width: 0; }
 .goto input { width: 100%; min-width: 0; text-align: center; }
 .keys { font-size: 0.65rem; margin: 0 0 0.8rem; letter-spacing: 0.02em; }
@@ -187,7 +193,7 @@ select { font: inherit; color: inherit; background: #181b21; border: 1px solid v
 .run-times-form input { width: 100%; box-sizing: border-box; color-scheme: dark; }
 .date-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 0 0.5rem; }
 .date-pair input { min-width: 0; color-scheme: dark; }
-.log { list-style: none; margin: 0; padding: 0; font-size: 0.75rem; max-height: 180px; overflow-y: auto; display: grid; gap: 0.25rem; }
+.log { list-style: none; margin: 0; padding: 0; font-size: 0.75rem; max-height: 180px; overflow-y: auto; overflow-x: hidden; overflow-wrap: anywhere; display: grid; gap: 0.25rem; }
 .log time { color: var(--muted); margin-right: 0.4rem; }
 
 @media (max-width: 760px) {
@@ -423,7 +429,7 @@ select { font: inherit; color: inherit; background: #181b21; border: 1px solid v
   .edit-pane { overflow-y: auto; }
   .editor-rows { max-height: none; }
   .script-viewer { height: auto; }
-  .controls { position: static; overflow-y: auto; }
+  .controls { position: static; overflow-y: auto; overflow-x: hidden; }
   /* Script under the cue list: they share the height, and the controls span both. */
   .board-body.with-script { grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
   .board-body.with-script .controls { grid-row: 1 / span 2; }
