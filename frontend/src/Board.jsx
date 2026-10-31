@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Link } from 'react-router'
 import gsap from 'gsap'
 import { useGSAP } from '@gsap/react'
 import { api } from './api'
 import { follow } from './live'
 import CueEditor from './board/CueEditor'
 import FilesDialog from './board/FilesDialog'
+import FollowShare from './board/FollowShare'
 import PeopleDialog from './board/PeopleDialog'
 import { can } from './access'
 import Unavailable from './Unavailable'
@@ -466,13 +466,7 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
         >
           {liveStatus === 'live' ? 'Synced' : liveStatus === 'connecting' ? 'Connecting…' : 'Reconnecting…'}
         </span>
-        <Link
-          className="button ghost small follow-link"
-          to={`/productions/${productionId}/follow`}
-          title="A read-only view of the live run, for tablets backstage"
-        >
-          Follow view
-        </Link>
+        <FollowShare productionId={productionId} />
         <div className="mode-toggle" role="group" aria-label="Board mode" hidden={!canEdit}>
           <button className={live ? 'on' : ''} aria-pressed={live} onClick={() => setMode('live')}>
             Live

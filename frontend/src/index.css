@@ -338,7 +338,11 @@ select { font: inherit; color: inherit; background: #181b21; border: 1px solid v
 }
 
 /* Follow view: read-only, for tablets backstage. Sized to read at arm's length. */
-.follow-link { align-self: center; flex: none; }
+.follow-share { align-self: center; flex: none; position: relative; display: flex; gap: 0.3rem; }
+.follow-share-box { position: absolute; top: calc(100% + 0.4rem); right: 0; z-index: 5; width: min(420px, calc(100vw - 32px)); padding: 0.6rem; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4); }
+.follow-share-box .row { margin: 0; }
+.follow-share-box input { flex: 1; min-width: 0; font-size: 0.75rem; }
+.follow-share-box p { margin: 0.5rem 0 0; font-size: 0.7rem; }
 .follow { max-width: 1000px; margin: 0 auto; display: grid; gap: 1rem; }
 .follow-head { display: flex; align-items: center; gap: 1rem; }
 .follow-head .button { padding: 0.45rem 0.8rem; }
