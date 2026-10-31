@@ -173,8 +173,9 @@ select { font: inherit; color: inherit; background: #181b21; border: 1px solid v
 .resume { border-color: var(--go); color: var(--go); background: #0d3324; font-weight: 700; letter-spacing: 0.12em; }
 .playback-hold { display: none; font-size: 0.75rem; }
 .preview-banner { color: var(--stby); font-size: 0.75rem; letter-spacing: 0.12em; margin: 0 0 0.5rem; }
-.new-run { margin-bottom: 0.3rem; }
-.new-run .row { margin-bottom: 0.35rem; }
+.new-run { margin-bottom: 0.3rem; display: grid; gap: 0.4rem; justify-items: start; }
+.new-run > input, .new-run > select, .new-run label, .new-run input[type='datetime-local'] { width: 100%; box-sizing: border-box; }
+.new-run label { margin: 0; }
 .new-run input[type='datetime-local'] { color-scheme: dark; }
 .run-times { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.5rem; margin: 0.4rem 0 0.2rem; }
 .run-times dl { display: grid; grid-template-columns: auto 1fr; gap: 0.1rem 0.6rem; margin: 0; font-size: 0.75rem; }
