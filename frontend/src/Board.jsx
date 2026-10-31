@@ -380,7 +380,8 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
       return false
     }
   }
-  const addNote = (cue, text) => noteAction(() => api.addCueNote(run.id, { cue, text }), (notes, n) => [...notes, n])
+  const addNote = (cue, text, section) =>
+    noteAction(() => api.addCueNote(run.id, { cue, text, section }), (notes, n) => [...notes, n])
   const editNote = (id, text) =>
     noteAction(
       () => api.updateCueNote(id, { text }),
@@ -709,6 +710,7 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
             run={run}
             cues={cueList}
             canOperate={canOperate}
+            noteSections={production?.note_sections}
             noteCueNumber={cueList.find((c) => c.id === loadedCue)?.number ?? run?.state.active_number ?? ''}
             noteRef={noteRef}
             onAddNote={addNote}

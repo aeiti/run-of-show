@@ -21,6 +21,11 @@ where the show was: the run clock (playing time since the start, held time
 left out, as in the scene lengths), the scene, and the hold it was written
 in, if any. These are worked out from the note's time, so correcting the
 run's start corrects them. A note added later with no time comes last.
+
+The email is the distributed report: notes grouped under the production's
+sections, in its order, as prose without time stamps. A note's cue and scene
+are printed only where the SM chose to show them. ``stamps`` prints every
+note's time, run clock, cue and scene instead, as in the SM's working view.
 """
 
 from bisect import bisect_right
@@ -72,7 +77,7 @@ def holds(events, until):
     ]
 
 
-def _scene_lookup(cues):
+def scene_lookup(cues):
     """A function from a cue number to its scene ("" before the first scene)."""
     numbers, names, current = [], [], ""
     for cue in cues:
@@ -142,6 +147,8 @@ def performance_notes(notes, events, scene_of, start, found_holds, until):
             "follow_up": note.follow_up,
             "follow_up_by": shown_name(note.follow_up_by),
             "follow_up_at": note.follow_up_at,
+            "section": note.section,
+            "show_cue": note.show_cue,
             "created_at": note.created_at,
             "updated_at": note.updated_at,
         })
@@ -158,7 +165,7 @@ def build(run, now=None):
     found_holds = holds(events, until)
     spans = [(h["started_at"], h["resumed_at"] or until) for h in found_holds]
     start = run.started_at
-    scene_of = _scene_lookup(list(production.cues.all()))
+    scene_of = scene_lookup(list(production.cues.all()))
     return {
         "as_of": as_of,
         "in_progress": run.ended_at is None,
@@ -196,7 +203,7 @@ def build(run, now=None):
             run.cue_notes.select_related("author__profile", "follow_up_by__profile"),
             events, scene_of, start, found_holds, until,
         ),
-        "notes": run.notes,
+        "sections": production.sections,
     }
 
 
@@ -277,6 +284,24 @@ def _note_stamp(note):
     return stamp
 
 
+OTHER_NOTES = "Other notes"
+
+
+def by_section(report):
+    """(section, notes) pairs: every one of the production's sections in order,
+    even with no notes; then sections no longer in its list that notes still
+    name; then the notes not sorted into one, if there are any."""
+    groups = {name: [] for name in report["sections"]}
+    unsorted = []
+    for note in report["performance_notes"]:
+        if note["section"]:
+            groups.setdefault(note["section"], []).append(note)
+        else:
+            unsorted.append(note)
+    pairs = list(groups.items())
+    return pairs + [(OTHER_NOTES, unsorted)] if unsorted else pairs
+
+
 def _note_flags(note):
     flags = []
     if note["in_hold"]:
@@ -286,7 +311,24 @@ def _note_flags(note):
     return ", ".join(flags)
 
 
-def as_text(report):
+def _note_lines(note, stamps):
+    where = _note_where(note)
+    if stamps:
+        flags = _note_flags(note)
+        by = f" ({note['author']})" if note["author"] else ""
+        lines = [
+            f"  {_note_stamp(note)}{f'  {where}' if where else ''}{f' [{flags}]' if flags else ''}",
+            f"    {note['text']}{by}",
+        ]
+    else:
+        lines = [f"  - {note['text']}{f' ({where})' if where and note['show_cue'] else ''}"]
+    if note["follow_up"]:
+        follow_by = f" ({note['follow_up_by']})" if stamps and note["follow_up_by"] else ""
+        lines.append(f"    Follow-up: {note['follow_up']}{follow_by}")
+    return lines
+
+
+def as_text(report, stamps=False):
     production, run = report["production"], report["run"]
     lines = [
         subject(report),
@@ -313,27 +355,44 @@ def as_text(report):
                 f"{hold['reason']}{f' (at {at})' if at else ''}"
             )
 
-    if report["performance_notes"]:
-        lines += ["", "PERFORMANCE NOTES"]
-        for note in report["performance_notes"]:
-            where, flags = _note_where(note), _note_flags(note)
-            by = f" ({note['author']})" if note["author"] else ""
-            lines.append(
-                f"  {_note_stamp(note)}{f'  {where}' if where else ''}{f' [{flags}]' if flags else ''}"
-            )
-            lines.append(f"    {note['text']}{by}")
-            if note["follow_up"]:
-                follow_by = f" ({note['follow_up_by']})" if note["follow_up_by"] else ""
-                lines.append(f"    Follow-up: {note['follow_up']}{follow_by}")
-
-    if report["notes"]:
-        lines += ["", "NOTES", report["notes"]]
+    for section, notes in by_section(report):
+        lines += ["", section.upper()]
+        if not notes:
+            lines.append("  Nothing to report.")
+        for note in notes:
+            lines += _note_lines(note, stamps)
 
     lines += ["", f"Report made {_when(report['as_of'])}."]
     return "\n".join(lines) + "\n"
 
 
-def as_html(report):
+def _note_html(note, stamps):
+    where = _note_where(note)
+    follow_up = format_html(
+        "<br><i>Follow-up:</i> <span style='white-space: pre-wrap'>{}</span> <i>{}</i>",
+        note["follow_up"],
+        note["follow_up_by"] if stamps else "",
+    ) if note["follow_up"] else ""
+    if stamps:
+        flags = _note_flags(note)
+        return format_html(
+            "<li><small>{}</small> <b>{}</b>{}<br><span style='white-space: pre-wrap'>{}</span> <i>{}</i>{}</li>",
+            _note_stamp(note),
+            where,
+            f" [{flags}]" if flags else "",
+            note["text"],
+            note["author"],
+            follow_up,
+        )
+    return format_html(
+        "<li><span style='white-space: pre-wrap'>{}</span>{}{}</li>",
+        note["text"],
+        f" ({where})" if where and note["show_cue"] else "",
+        follow_up,
+    )
+
+
+def as_html(report, stamps=False):
     """The same report as simple HTML. Every value is escaped by format_html."""
     production, run = report["production"], report["run"]
     parts = [
@@ -372,26 +431,10 @@ def as_html(report):
                 for h in report["holds"]["items"]
             ),
         )))
-    if report["performance_notes"]:
-        items = []
-        for n in report["performance_notes"]:
-            flags = _note_flags(n)
-            follow_up = format_html(
-                "<br><i>Follow-up:</i> <span style='white-space: pre-wrap'>{}</span> <i>{}</i>",
-                n["follow_up"],
-                n["follow_up_by"],
-            ) if n["follow_up"] else ""
-            items.append(format_html(
-                "<li><small>{}</small> <b>{}</b>{}<br><span style='white-space: pre-wrap'>{}</span> <i>{}</i>{}</li>",
-                _note_stamp(n),
-                _note_where(n),
-                f" [{flags}]" if flags else "",
-                n["text"],
-                n["author"],
-                follow_up,
-            ))
-        parts.append(format_html("<h2>Performance notes</h2><ul>{}</ul>", format_html_join("", "{}", ((i,) for i in items))))
-    if report["notes"]:
-        parts.append(format_html("<h2>Notes</h2><p style='white-space: pre-wrap'>{}</p>", report["notes"]))
+    for section, notes in by_section(report):
+        items = format_html_join("", "{}", ((_note_html(n, stamps),) for n in notes))
+        parts.append(format_html("<h2>{}</h2><ul>{}</ul>", section, items) if notes else format_html(
+            "<h2>{}</h2><p>Nothing to report.</p>", section
+        ))
     parts.append(format_html("<p><small>Report made {}.</small></p>", _when(report["as_of"])))
     return "".join(parts)

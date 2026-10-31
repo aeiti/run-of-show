@@ -380,7 +380,11 @@ class RunViewSet(LiveUpdates, mixins.RetrieveModelMixin, mixins.UpdateModelMixin
 
     @action(detail=True, methods=["post"])
     def resume(self, request, pk=None):
-        return self._act(request, pk, services.resume)
+        response = self._act(request, pk, lambda run: services.resume(run, author=request.user))
+        if response.status_code == status.HTTP_201_CREATED:
+            # The resume added a note about the hold.
+            live.broadcast(self.live_production_id, {"type": "notes", "run": int(pk)})
+        return response
 
     @action(detail=True, methods=["get", "post"], url_path="notes")
     def cue_notes(self, request, pk=None):
@@ -413,7 +417,8 @@ class RunViewSet(LiveUpdates, mixins.RetrieveModelMixin, mixins.UpdateModelMixin
         to = body.validated_data["to"]
 
         built = report.build(run)
-        subject, text, html = report.subject(built), report.as_text(built), report.as_html(built)
+        stamps = body.validated_data["stamps"]
+        subject, text, html = report.subject(built), report.as_text(built, stamps), report.as_html(built, stamps)
         reply_to = [request.user.email] if request.user.email else None
         messages = []
         for address in to:

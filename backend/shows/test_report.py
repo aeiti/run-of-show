@@ -66,9 +66,7 @@ def show():
         n: Cue.objects.create(production=production, number=Decimal(n), label=f"Cue {n}", scene=scenes.get(n, ""))
         for n in ["1", "2", "5", "10", "20", "30"]
     }
-    run = Run.objects.create(
-        production=production, label="Preview 1", kind=Run.Kind.PREVIEW, notes="Patron fell in row F at 19:50."
-    )
+    run = Run.objects.create(production=production, label="Preview 1", kind=Run.Kind.PREVIEW)
     log(
         run,
         cues,
@@ -147,7 +145,7 @@ def test_report_notes_in_time_order(show):
         ("2", "Q2 early", "alice"),
         ("10", "Q10 late on the thunder", "alice"),
     ]
-    assert built["notes"] == "Patron fell in row F at 19:50."
+    assert built["sections"][:3] == ["Absences/Lateness", "Injury/Illness", "Show"]
 
 
 def note(show, text, moment=None, cue=None, **fields):
@@ -214,17 +212,17 @@ def test_the_email_shows_each_notes_stamps_flags_and_follow_up(show):
     note(show, "Fly bar <b>stuck</b>", cue="20", added_later=True)
     built = report.build(show.run)
 
-    text = report.as_text(built)
+    text = report.as_text(built, stamps=True)
     for expected in [
-        "PERFORMANCE NOTES",
+        "OTHER NOTES",
         "  19:52:00 · 16:00  1.1 Lamp Room [in hold: Audience medical]",
         "    Patron unwell, row F",
         "    Follow-up: FOH followed up; patron fine. (bob)",
         "  Added later  Q20 Cue 20 · 1.2 Wreck",
     ]:
         assert expected in text, expected
-    html = report.as_html(built)
-    assert "<h2>Performance notes</h2>" in html and "FOH followed up" in html
+    html = report.as_html(built, stamps=True)
+    assert "<h2>Other notes</h2>" in html and "FOH followed up" in html and "bob" in html
     assert "<b>stuck</b>" not in html and "&lt;b&gt;stuck&lt;/b&gt;" in html
 
 
@@ -349,7 +347,7 @@ def test_strangers_and_anonymous_users_get_nothing(show):
 
 @pytest.mark.django_db
 def test_the_email_carries_the_report_as_text_and_html(show):
-    Run.objects.filter(pk=show.run.pk).update(notes="Kid <script>alert(1)</script> in row F")
+    note(show, "Kid <script>alert(1)</script> in row F", at(19, 50), section="Show")
     response = client_for(show.owner).post(
         f"/api/runs/{show.run.id}/report/email/", {"to": ["sm@example.com", "lx@example.com"]}, format="json"
     )
@@ -373,9 +371,9 @@ def test_the_email_carries_the_report_as_text_and_html(show):
         "  1.1 Lamp Room: 30:00 (held 5:00)",
         "  19:50:00  5:00  Audience medical (at Q5)",
         "  20:20:00  10:00, not resumed  Fly bar stuck (at Q20)",
-        "  20:45:00 · 56:00  Q10 Cue 10 · 1.1 Lamp Room",
-        "    Q10 late on the thunder (alice)",
-        "Kid <script>alert(1)</script> in row F",
+        "SHOW\n  - Kid <script>alert(1)</script> in row F",
+        "LIGHTING\n  Nothing to report.",
+        "OTHER NOTES\n  - Q2 early\n  - Q10 late on the thunder",
     ]:
         assert expected in text, expected
     html, kind = message.alternatives[0]
@@ -427,3 +425,51 @@ def test_emailing_reports_is_rate_limited(show, monkeypatch):
     assert len(mail.outbox) == 2
     # Reading the report isn't limited.
     assert client.get(f"/api/runs/{show.run.id}/report/").status_code == 200
+
+
+# Sections and the distributed report
+
+
+@pytest.mark.django_db
+def test_notes_are_grouped_under_the_productions_sections(show):
+    Production.objects.filter(pk=show.production.pk).update(note_sections=["Show", "Lighting", "Sound"])
+    show.run.refresh_from_db()
+    note(show, "Big laugh on the bell", at(19, 45), section="Show")
+    note(show, "Q10 bumped", at(20, 1), cue="10", section="Lighting", show_cue=True)
+    note(show, "From when Props was a section", at(19, 50), section="Props")
+
+    built = report.build(show.run)
+    groups = [(name, [n["text"] for n in notes]) for name, notes in report.by_section(built)]
+    assert groups == [
+        ("Show", ["Big laugh on the bell"]),
+        ("Lighting", ["Q10 bumped"]),
+        ("Sound", []),
+        # Still named by a note, though no longer in the list.
+        ("Props", ["From when Props was a section"]),
+        # The fixture's two notes aren't sorted into a section.
+        ("Other notes", ["Q2 early", "Q10 late on the thunder"]),
+    ]
+
+
+@pytest.mark.django_db
+def test_the_distributed_report_prints_a_notes_cue_only_when_asked(show):
+    note(show, "Q10 bumped", at(20, 1), cue="10", section="Lighting", show_cue=True)
+    note(show, "Spot op late on the pickup", at(20, 2), cue="10", section="Lighting", follow_up="Spoke to the op.")
+    text = report.as_text(report.build(show.run))
+    assert "LIGHTING\n  - Q10 bumped (Q10 Cue 10 · 1.1 Lamp Room)\n  - Spot op late on the pickup\n" in text
+    assert "    Follow-up: Spoke to the op.\n" in text
+    # No stamps or authors without them.
+    assert "20:01:00" not in text and "(alice)" not in text
+    html = report.as_html(report.build(show.run))
+    assert "<li><span style='white-space: pre-wrap'>Q10 bumped</span> (Q10 Cue 10 · 1.1 Lamp Room)</li>" in html
+
+
+@pytest.mark.django_db
+def test_the_email_can_carry_the_stamps(show):
+    client = client_for(show.owner)
+    url = f"/api/runs/{show.run.id}/report/email/"
+    client.post(url, {"to": ["sm@example.com"]}, format="json")
+    client.post(url, {"to": ["sm@example.com"], "stamps": True}, format="json")
+    plain, stamped = (m.body for m in mail.outbox)
+    assert "  - Q10 late on the thunder\n" in plain and "20:45:00" not in plain
+    assert "  20:45:00 · 56:00  Q10 Cue 10 · 1.1 Lamp Room\n    Q10 late on the thunder (alice)" in stamped

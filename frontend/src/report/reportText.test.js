@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest'
-import { cueText, lateness, length, noteMoment, noteWhere, parseAddresses, sceneName } from './reportText'
+import {
+  bySection,
+  cueText,
+  lateness,
+  length,
+  noteMoment,
+  noteWhere,
+  OTHER_NOTES,
+  parseAddresses,
+  sceneName,
+  timeline,
+} from './reportText'
 
 describe('length', () => {
   it('writes seconds as a clock, and a missing length as a dash', () => {
@@ -69,5 +80,37 @@ describe('performance notes', () => {
     expect(noteMoment('0:15', start)).toBe(new Date(2026, 2, 15, 0, 15).toISOString())
     expect(noteMoment('', start)).toBe(null)
     expect(noteMoment('later', start)).toBe(null)
+  })
+})
+
+describe('note sections', () => {
+  it('groups notes as the email does: every section, then old ones, then unsorted', () => {
+    const notes = [
+      { id: 1, section: 'Show' },
+      { id: 2, section: '' },
+      { id: 3, section: 'Props' },
+      { id: 4, section: 'Show' },
+    ]
+    const groups = bySection(['Show', 'Lighting'], notes).map(([name, ns]) => [name, ns.map((n) => n.id)])
+    expect(groups).toEqual([
+      ['Show', [1, 4]],
+      ['Lighting', []],
+      ['Props', [3]],
+      [OTHER_NOTES, [2]],
+    ])
+    expect(bySection(['Show'], [])).toEqual([['Show', []]])
+  })
+})
+
+describe('timeline', () => {
+  it('interleaves scenes, holds and notes by time, with untimed notes last', () => {
+    const scenes = [{ name: 'Preshow', started_at: '2026-03-14T19:34:00Z' }]
+    const holds = [{ reason: 'Medical', started_at: '2026-03-14T19:50:00Z' }]
+    const notes = [
+      { id: 1, at: '2026-03-14T19:50:00Z' },
+      { id: 2, at: null },
+      { id: 3, at: '2026-03-14T19:30:00Z' },
+    ]
+    expect(timeline(scenes, holds, notes).map((item) => item.key)).toEqual(['n3', 's0', 'h0', 'n1', 'n2'])
   })
 })
