@@ -13,12 +13,14 @@ from rest_framework.response import Response
 
 from . import backup, csv_io, live, report, services, uploads
 from .access import ProductionRole, visible_productions
-from .models import Cue, CueNote, Membership, Production, ProductionFile, Run
+from .console import supervisor
+from .models import Cue, CueNote, EosConsole, Membership, Production, ProductionFile, Run
 from .serializers import (
     CueEventSerializer,
     CueNoteSerializer,
     CueSerializer,
     CueTargetSerializer,
+    EosConsoleSerializer,
     FileUploadSerializer,
     HoldSerializer,
     InviteSerializer,
@@ -82,6 +84,7 @@ class ProductionViewSet(LiveUpdates, viewsets.ModelViewSet):
         "members": "share",
         "files": "edit",
         "logo": "edit",
+        "console": "edit",
         # The copy belongs to whoever makes it, and holds nothing they can't
         # already read and export, so any role may duplicate.
         "duplicate": "view",
@@ -239,6 +242,18 @@ class ProductionViewSet(LiveUpdates, viewsets.ModelViewSet):
                 production.logo = ""
             production.save(update_fields=["logo"])
         return Response(ProductionSerializer(production, context={"request": request}).data)
+
+    @action(detail=True, methods=["get", "put"])
+    def console(self, request, pk=None):
+        """The Eos console settings and the listener's status. PUT changes the settings, which restarts the listener."""
+        production = self.get_object()
+        config = EosConsole.objects.filter(production=production).first()
+        if request.method == "PUT":
+            serializer = EosConsoleSerializer(config, data=request.data, context={"production": production})
+            serializer.is_valid(raise_exception=True)
+            config = serializer.save(production=production)
+        data = EosConsoleSerializer(config or EosConsole(production=production)).data
+        return Response({**data, "status": supervisor.status(production.id)})
 
     @action(detail=True, methods=["get", "post"])
     def members(self, request, pk=None):

@@ -7,6 +7,12 @@ from django.contrib.auth import get_user_model
 from shows.models import Cue, Production, Run
 
 
+@pytest.fixture(autouse=True)
+def no_console_listeners(settings):
+    # Tests that listen make their own Supervisor; the server's stays idle.
+    settings.EOS_LISTENERS = False
+
+
 @pytest.fixture
 def make_user():
     def _make(username):

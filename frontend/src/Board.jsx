@@ -3,6 +3,7 @@ import gsap from 'gsap'
 import { useGSAP } from '@gsap/react'
 import { api } from './api'
 import { follow } from './live'
+import ConsoleDialog, { ConsoleStatus } from './board/Console'
 import CueEditor from './board/CueEditor'
 import FilesDialog from './board/FilesDialog'
 import FollowShare from './board/FollowShare'
@@ -45,6 +46,8 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
   const [importing, setImporting] = useState(false)
   const [showPeople, setShowPeople] = useState(false)
   const [liveStatus, setLiveStatus] = useState('connecting')
+  const [consoleInfo, setConsoleInfo] = useState(null)
+  const [showConsole, setShowConsole] = useState(false)
   const [files, setFiles] = useState([])
   const [showFiles, setShowFiles] = useState(false)
   const [showScript, setShowScript] = useState(false)
@@ -97,6 +100,11 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
   const labels = useMemo(() => trackLabels(cueList, trackWidth), [cueList, trackWidth])
   const scenes = useMemo(() => sceneSpans(cueList, trackWidth), [cueList, trackWidth])
   const pct = (count) => `${(count / cueList.length) * 100}%`
+
+  // The console listener's settings and status; not needed to run the board, so a failure is quiet.
+  useEffect(() => {
+    api.console(productionId).then(setConsoleInfo, () => {})
+  }, [productionId])
 
   useEffect(() => {
     let cancelled = false
@@ -372,11 +380,15 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
         case 'production.deleted':
           setGone(true)
           break
+        case 'console':
+          setConsoleInfo((prev) => prev && { ...prev, status: message.status })
+          break
         case 'resync': {
           const [p, c, r] = await Promise.all([api.production(productionId), api.cues(productionId), api.runs(productionId)])
           setProduction(p)
           setCues(sortCues(c))
           setRuns(r)
+          api.console(productionId).then(setConsoleInfo, () => {})
           await refreshRun()
           setFiles(await api.files(productionId))
           break
@@ -466,6 +478,7 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
         >
           {liveStatus === 'live' ? 'Synced' : liveStatus === 'connecting' ? 'Connecting…' : 'Reconnecting…'}
         </span>
+        <ConsoleStatus info={consoleInfo} canEdit={canEdit} onOpen={() => setShowConsole(true)} />
         <FollowShare productionId={productionId} />
         <div className="mode-toggle" role="group" aria-label="Board mode" hidden={!canEdit}>
           <button className={live ? 'on' : ''} aria-pressed={live} onClick={() => setMode('live')}>
@@ -637,6 +650,16 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
       </div>
       {showPeople && (
         <PeopleDialog production={production} me={me} onClose={() => setShowPeople(false)} onLeft={onBack} />
+      )}
+      {showConsole && consoleInfo && (
+        <ConsoleDialog
+          productionId={productionId}
+          info={consoleInfo}
+          // The listener restarts after the save, and its status arrives over the socket,
+          // possibly before this response; keep the newest.
+          onSaved={(saved) => setConsoleInfo((prev) => ({ ...saved, status: prev?.status ?? saved.status }))}
+          onClose={() => setShowConsole(false)}
+        />
       )}
       {showFiles && (
         <FilesDialog production={production} files={files} onChange={setFiles} onClose={() => setShowFiles(false)} />

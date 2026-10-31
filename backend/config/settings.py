@@ -92,6 +92,11 @@ ASGI_APPLICATION = 'config.asgi.application'
 # (channels_redis) instead.
 CHANNEL_LAYERS = {'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'}}
 
+# Eos console listeners run in the server process (shows/console.py). UDP
+# listeners bind to this address; set EOS_LISTENERS=false to run none.
+EOS_LISTENERS = os.environ.get('EOS_LISTENERS', 'true').lower() != 'false'
+EOS_BIND_ADDRESS = os.environ.get('EOS_BIND_ADDRESS', '0.0.0.0')
+
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases

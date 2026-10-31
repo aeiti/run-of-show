@@ -230,6 +230,22 @@ select { font: inherit; color: inherit; background: #181b21; border: 1px solid v
 .sync-status.live::before { background: var(--go); }
 .sync-status.reconnecting { color: var(--stby); }
 .sync-status.reconnecting::before { background: var(--stby); }
+.console-status { align-self: center; font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); white-space: nowrap; flex: none; }
+.console-status.as-button { background: none; border: 0; padding: 0; cursor: pointer; font: inherit; font-size: 0.68rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.console-status.as-button:hover { color: var(--text); }
+.console-status::before { content: ''; display: inline-block; width: 0.45rem; height: 0.45rem; border-radius: 50%; margin-right: 0.35rem; background: var(--muted); vertical-align: 0.05rem; }
+.console-status.listening::before, .console-status.connected::before { background: var(--go); }
+.console-status.error, .console-status.has-problem { color: var(--stby); }
+.console-status.error::before, .console-status.connecting::before { background: var(--stby); }
+.console-button { align-self: center; flex: none; }
+.console-dialog { width: min(560px, 100%); }
+.console-dialog .check { display: flex; align-items: center; gap: 0.5rem; color: var(--text); }
+.console-dialog .check input { width: auto; }
+.console-dialog label .error { margin: 0; }
+.console-now { font-size: 0.8rem; margin: 0 0 0.75rem; }
+.console-now.error { color: var(--stby); }
+.console-problem { display: block; color: var(--stby); margin-top: 0.25rem; }
+.console-help { margin: 0.25rem 0 0.75rem; line-height: 1.5; }
 
 /* People dialog */
 .people { width: min(520px, 100%); }
