@@ -468,31 +468,34 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
           onScript={script && (() => setShowScript(!showScript))}
           scriptShown={showScript}
         />
-        <span
-          className={`sync-status ${liveStatus}`}
-          role="status"
-          title={
-            liveStatus === 'live'
-              ? 'Changes from other screens appear here as they happen'
-              : 'Not receiving changes from other screens; this board reloads when it reconnects'
-          }
-        >
-          {liveStatus === 'live' ? 'Synced' : liveStatus === 'connecting' ? 'Connecting…' : 'Reconnecting…'}
-        </span>
-        <ConsoleStatus info={consoleInfo} canEdit={canEdit} onOpen={() => setShowConsole(true)} />
-        <FollowShare productionId={productionId} />
-        <div className="mode-toggle" role="group" aria-label="Board mode" hidden={!canEdit}>
-          <button className={live ? 'on' : ''} aria-pressed={live} onClick={() => setMode('live')}>
-            Live
-          </button>
-          <button
-            className={live ? '' : 'on'}
-            aria-pressed={!live}
-            disabled={playingBack}
-            onClick={() => setMode('edit')}
+        {/* Status and mode: their own row when the header needs the room. */}
+        <div className="board-tools">
+          <span
+            className={`sync-status ${liveStatus}`}
+            role="status"
+            title={
+              liveStatus === 'live'
+                ? 'Changes from other screens appear here as they happen'
+                : 'Not receiving changes from other screens; this board reloads when it reconnects'
+            }
           >
-            Edit
-          </button>
+            {liveStatus === 'live' ? 'Synced' : liveStatus === 'connecting' ? 'Connecting…' : 'Reconnecting…'}
+          </span>
+          <ConsoleStatus info={consoleInfo} canEdit={canEdit} onOpen={() => setShowConsole(true)} />
+          <FollowShare productionId={productionId} />
+          <div className="mode-toggle" role="group" aria-label="Board mode" hidden={!canEdit}>
+            <button className={live ? 'on' : ''} aria-pressed={live} onClick={() => setMode('live')}>
+              Live
+            </button>
+            <button
+              className={live ? '' : 'on'}
+              aria-pressed={!live}
+              disabled={playingBack}
+              onClick={() => setMode('edit')}
+            >
+              Edit
+            </button>
+          </div>
         </div>
       </div>
 
