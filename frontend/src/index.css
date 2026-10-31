@@ -345,13 +345,14 @@ select { font: inherit; color: inherit; background: #181b21; border: 1px solid v
 .follow-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .follow h2 { margin: 0 0 0.5rem; font-size: 0.75rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
 .follow section { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 1rem 1.25rem; }
-.follow-now { border-color: var(--go) !important; }
-.follow-now h2 { color: var(--go); }
-.follow-standby h2 { color: var(--stby); }
+/* Running and standby use the board's card looks (board/looks.js): amber for the active cue, grey for standby. */
+.follow .follow-now { background: #3a2d0a; border-color: #e8b730; }
+.follow-now h2 { color: #e8b730; }
+.follow .follow-standby { background: #22262d; border-color: #8a929e; }
+.follow-standby h2 { color: var(--text); }
 .follow-cue { display: flex; gap: 1.25rem; align-items: baseline; }
 .follow-number { font-size: clamp(2.5rem, 9vw, 5rem); font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1; flex: none; }
-.follow-now .follow-number { color: var(--go); }
-.follow-standby .follow-number { font-size: clamp(2rem, 6vw, 3.25rem); color: var(--stby); }
+.follow-standby .follow-number { font-size: clamp(2rem, 6vw, 3.25rem); }
 .follow-detail { display: grid; gap: 0.3rem; min-width: 0; }
 .follow-label { font-size: clamp(1.25rem, 3.5vw, 2rem); }
 .follow-meta { color: var(--muted); font-size: 0.9rem; }
