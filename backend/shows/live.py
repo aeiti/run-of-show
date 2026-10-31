@@ -13,6 +13,9 @@ sends the group one small message:
 * ``production.deleted``: boards leave.
 * ``console.log``: a console or network line was added to a run's log;
   boards showing that run refetch it.
+* ``cue.progress``: how far the active cue's fade has got on the console;
+  ``cue.stop`` and ``cue.resume``: the console stopped or resumed it (see
+  ``eos.py``). Boards move the cue's fade bar; nothing is recorded.
 * ``console``: the Eos console listener's status changed (see ``console.py``),
   sent with the new status.
 

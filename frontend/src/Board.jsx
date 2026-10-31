@@ -31,7 +31,8 @@ gsap.ticker.lagSmoothing(0)
 // The entrance animates the outer <li>, so the two never tween the same property.
 // Each card's .cue-fade bar fills over the cue's time after it goes, so the
 // operator can see when a cue has finished; a later action cuts it off. When
-// Eos reports the cue's progress, the bar follows that instead.
+// Eos reports the cue's progress, the bar follows that instead, and holds while
+// the console has the cue stopped.
 
 export default function Board({ productionId, runId, me, onBack, onSelectRun, onSignedOut }) {
   const [production, setProduction] = useState(null)
@@ -179,7 +180,8 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
       if (looks[i] !== 'active') {
         gsap.killTweensOf(bar)
         gsap.set(bar, { scaleX: 0 })
-      } else if (!gsap.isTweening(bar)) {
+        delete bar.dataset.stopped
+      } else if (!gsap.isTweening(bar) && !('stopped' in bar.dataset)) {
         gsap.set(bar, { scaleX: 1 }) // already active when the board opened: its fade is long over
       }
     })
@@ -259,7 +261,9 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
     if (card) {
       gsap.fromTo(card, { ...FLASH.from }, { ...FLASH.to })
       const fade = fadeFor(event.action, cueList[index])
-      gsap.fromTo(card.querySelector('.cue-fade'), { scaleX: 0 }, { scaleX: 1, duration: fade, ease: 'none' })
+      const bar = card.querySelector('.cue-fade')
+      delete bar.dataset.stopped
+      gsap.fromTo(bar, { scaleX: 0 }, { scaleX: 1, duration: fade, ease: 'none' })
       card.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
     }
   })
@@ -273,7 +277,29 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
     const sample = { ...message, at: performance.now() / 1000 }
     const { from, duration } = progressFade(sample, lastProgress.current, fadeSeconds(cueList[index]))
     lastProgress.current = sample
+    delete bar.dataset.stopped
     gsap.killTweensOf(bar)
+    gsap.fromTo(bar, { scaleX: from }, { scaleX: 1, duration, ease: 'none' })
+  })
+
+  // Eos stopped the active cue's fade: hold its bar where it is, marked so settling
+  // the cards doesn't fill it. Resumed: carry on from there over what's left of the
+  // cue's time, until Eos's progress takes over.
+  const applyStop = contextSafe((message, resumed) => {
+    if (!live || playingBack || message.cue !== run?.state.active_cue) return
+    const index = cueList.findIndex((c) => c.id === message.cue)
+    const bar = cardRefs.current[index]?.querySelector('.cue-fade')
+    if (!bar) return
+    // A sample from before the stop would make the pace after it look slower.
+    lastProgress.current = null
+    gsap.killTweensOf(bar)
+    if (!resumed) {
+      bar.dataset.stopped = ''
+      return
+    }
+    delete bar.dataset.stopped
+    const at = Number(gsap.getProperty(bar, 'scaleX'))
+    const { from, duration } = progressFade({ cue: message.cue, progress: at }, null, fadeSeconds(cueList[index]))
     gsap.fromTo(bar, { scaleX: from }, { scaleX: 1, duration, ease: 'none' })
   })
 
@@ -398,6 +424,10 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
           break
         case 'cue.progress':
           if (message.run === current) applyProgress(message)
+          break
+        case 'cue.stop':
+        case 'cue.resume':
+          if (message.run === current) applyStop(message, message.type === 'cue.resume')
           break
         case 'runs':
           setRuns(await api.runs(productionId))
