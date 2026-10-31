@@ -30,13 +30,13 @@ function logText(events, i) {
   return e.action === 'reset' ? '' : `Q${e.cue_number} ${e.cue_label}`
 }
 
-/** Events and cue notes in one list, in time order. */
+/** Events and cue notes in one list, newest first, so the latest stays in view. */
 function logItems(events, notes) {
   const items = [
     ...events.map((e, i) => ({ key: `e${e.id}`, at: e.fired_at, i })),
     ...notes.map((n) => ({ key: `n${n.id}`, at: n.created_at, note: n })),
   ]
-  return items.sort((a, b) => Date.parse(a.at) - Date.parse(b.at))
+  return items.sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
 }
 
 /** Pick, start or end a run, write cue notes, and show its log. */
