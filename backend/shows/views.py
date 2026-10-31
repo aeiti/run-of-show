@@ -253,7 +253,7 @@ class ProductionViewSet(LiveUpdates, viewsets.ModelViewSet):
             serializer.is_valid(raise_exception=True)
             config = serializer.save(production=production)
         data = EosConsoleSerializer(config or EosConsole(production=production)).data
-        return Response({**data, "status": supervisor.status(production.id)})
+        return Response({**data, "status": supervisor.status(production.id), "recent": supervisor.recent(production.id)})
 
     @action(detail=True, methods=["get", "post"])
     def members(self, request, pk=None):

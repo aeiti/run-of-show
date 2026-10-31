@@ -31,6 +31,9 @@ services:
       LAN_HOSTS: ${LAN_HOSTS:-}
     ports:
       - "5600:5600"
+      # Eos console listeners (shows/console.py): ETC's recommended UDP range.
+      # A production's UDP port must be one of these to be reachable in Docker.
+      - "4703-4727:4703-4727/udp"
     volumes:
       - ./backend:/app/backend
       - media:/app/media

@@ -246,6 +246,11 @@ select { font: inherit; color: inherit; background: #181b21; border: 1px solid v
 .console-now.error { color: var(--stby); }
 .console-problem { display: block; color: var(--stby); margin-top: 0.25rem; }
 .console-help { margin: 0.25rem 0 0.75rem; line-height: 1.5; }
+.console-recent h3 { margin: 0 0 0.4rem; }
+.console-recent ol { list-style: none; margin: 0 0 0.75rem; padding: 0; max-height: 180px; overflow-y: auto; font-size: 0.72rem; display: grid; gap: 0.2rem; font-family: ui-monospace, monospace; word-break: break-all; }
+.console-recent time { color: var(--muted); margin-right: 0.4rem; }
+.console-recent .result { color: var(--go); }
+.console-recent .problem { color: var(--stby); }
 
 /* People dialog */
 .people { width: min(520px, 100%); }

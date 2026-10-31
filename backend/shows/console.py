@@ -19,6 +19,8 @@ as a ``console`` message.
 
 import asyncio
 import logging
+import re
+from collections import deque
 from datetime import datetime, timezone
 
 from channels.db import database_sync_to_async
@@ -27,7 +29,7 @@ from django.db import transaction
 from django.db.models.signals import post_delete, post_save
 
 from . import live
-from .eos import LengthFramer, Relay, SlipFramer
+from .eos import LengthFramer, OSCError, Relay, SlipFramer, parse_packet
 from .models import EosConsole
 
 log = logging.getLogger(__name__)
@@ -35,6 +37,20 @@ log = logging.getLogger(__name__)
 FRAMERS = {"1.0": LengthFramer, "1.1": SlipFramer}
 # Hearing from the console after this long a silence is news worth sending to boards.
 HEARD_AGAIN_AFTER = 10
+# How many received messages, and what came of them, each production keeps to show.
+RECENT = 50
+# Fade progress, sent many times a second while a cue runs: kept in the recent
+# list but not written to the server log.
+PROGRESS = re.compile(r"^/eos/out/active/cue(/\d+/[0-9.]+)?$", re.I)
+
+
+def plain(arg):
+    """An OSC argument as something JSON can carry."""
+    if isinstance(arg, bytes):
+        return f"<{len(arg)} bytes>"
+    if isinstance(arg, float) and arg in (float("inf"), float("-inf")):
+        return str(arg)
+    return arg
 
 
 def now():
@@ -86,18 +102,37 @@ class Listener:
     def note(self, text, problem):
         """From the relay, in the database thread."""
         log.info("Production %s: %s", self.production_id, text)
+        when = now().isoformat()
+        self.supervisor.loop.call_soon_threadsafe(
+            lambda: self.supervisor.remember(self.production_id, {"at": when, "result": text, "problem": problem})
+        )
         if problem:
-            when = now().isoformat()
             self.supervisor.loop.call_soon_threadsafe(lambda: self.set(problem=text, problem_at=when))
 
-    def received(self, data):
+    def received(self, data, source=None):
         when = now()
+        self.record_received(data, source, when)
         if self.heard is None or (when - self.heard).total_seconds() > HEARD_AGAIN_AFTER:
             self.set(heard=when.isoformat())
         else:
             self.supervisor.quietly(self.production_id, heard=when.isoformat())
         self.heard = when
         self.packets.put_nowait(data)
+
+    def record_received(self, data, source, when):
+        """Keep each message to show, and log it, before the relay acts on it."""
+        frm = f" from {source}" if source else ""
+        try:
+            messages = parse_packet(data)
+        except OSCError:
+            log.info("Production %s: %s bytes%s, not OSC", self.production_id, len(data), frm)
+            self.supervisor.remember(self.production_id, {"at": when.isoformat(), "address": None, "args": [], "note": f"{len(data)} bytes{frm}, not OSC"})
+            return
+        for address, args in messages:
+            args = [plain(a) for a in args]
+            if not PROGRESS.match(address):
+                log.info("Production %s: OSC%s %s %s", self.production_id, frm, address, args)
+            self.supervisor.remember(self.production_id, {"at": when.isoformat(), "address": address, "args": args})
 
     async def work(self):
         # One packet at a time, in order, each in the database thread.
@@ -123,7 +158,7 @@ class Listener:
             try:
                 while chunk := await reader.read(65536):
                     for packet in framer.feed(chunk):
-                        self.received(packet)
+                        self.received(packet, host)
             except OSError:
                 pass
             finally:
@@ -135,7 +170,7 @@ class Datagrams(asyncio.DatagramProtocol):
         self.listener = listener
 
     def datagram_received(self, data, addr):
-        self.listener.received(data)
+        self.listener.received(data, addr[0])
 
 
 class Supervisor:
@@ -145,6 +180,7 @@ class Supervisor:
         self.loop = None
         self.listeners = {}
         self.statuses = {}
+        self.recents = {}
         self.lock = None
         self.starting = None
 
@@ -176,8 +212,10 @@ class Supervisor:
             config = await database_sync_to_async(lambda: EosConsole.objects.filter(pk=production_id).first())()
             if config is None or not config.enabled:
                 self.statuses.pop(production_id, None)
+                self.recents.pop(production_id, None)
                 self.send(production_id)
                 return
+            self.recents[production_id] = deque(maxlen=RECENT)
             self.statuses[production_id] = {"state": "starting", "detail": "", "heard": None, "problem": "", "problem_at": None}
             listener = Listener(config, self)
             self.listeners[production_id] = listener
@@ -189,6 +227,14 @@ class Supervisor:
 
     def status(self, production_id):
         return self.statuses.get(production_id, {"state": "off", "detail": "", "heard": None, "problem": "", "problem_at": None})
+
+    def remember(self, production_id, entry):
+        if production_id in self.recents:
+            self.recents[production_id].append(entry)
+
+    def recent(self, production_id):
+        """What the listener received and recorded, newest first."""
+        return list(reversed(self.recents.get(production_id, ())))
 
     def quietly(self, production_id, **changes):
         if production_id in self.statuses:
