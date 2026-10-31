@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   formatDateRange,
+  formatLogTime,
   formatLateness,
   fromLocalInput,
   keepSeconds,
@@ -73,5 +74,16 @@ describe('run lengths', () => {
     expect(formatLateness(-2)).toBe('−2 min')
     expect(formatLateness(0)).toBe('on time')
     expect(formatLateness(null)).toBe('')
+  })
+})
+
+describe('formatLogTime', () => {
+  it('shows the time to the millisecond', () => {
+    expect(formatLogTime('2026-10-31T05:12:52.481Z', 'en-GB', 'UTC')).toBe('05:12:52.481')
+    expect(formatLogTime('2026-10-31T05:12:52.481Z', 'en-GB', 'America/Los_Angeles')).toBe('22:12:52.481')
+  })
+
+  it('reads the microseconds Django sends without rounding up a second', () => {
+    expect(formatLogTime('2026-10-31T05:12:52.999900Z', 'en-GB', 'UTC')).toBe('05:12:52.999')
   })
 })

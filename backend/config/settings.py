@@ -102,7 +102,7 @@ EOS_BIND_ADDRESS = os.environ.get('EOS_BIND_ADDRESS', '0.0.0.0')
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
-    'formatters': {'console': {'format': '%(asctime)s %(message)s', 'datefmt': '%H:%M:%S'}},
+    'formatters': {'console': {'format': '%(asctime)s.%(msecs)03d %(message)s', 'datefmt': '%H:%M:%S'}},
     'handlers': {'console': {'class': 'logging.StreamHandler', 'formatter': 'console'}},
     'loggers': {'shows.console': {'handlers': ['console'], 'level': 'INFO', 'propagate': False}},
 }

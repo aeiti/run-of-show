@@ -25,6 +25,17 @@ export function toLocalInput(iso) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 
+/** A log entry's time of day to the millisecond ("22:12:52.481"), for telling apart entries in the same second. */
+export function formatLogTime(iso, locale = [], timeZone) {
+  return new Date(iso).toLocaleTimeString(locale, {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    fractionalSecondDigits: 3,
+    timeZone,
+  })
+}
+
 /** A datetime-local input's value as an ISO time, or null when it's empty. */
 export function fromLocalInput(value) {
   return value ? new Date(value).toISOString() : null

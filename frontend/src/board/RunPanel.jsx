@@ -3,7 +3,7 @@ import { Link } from 'react-router'
 import { CueNoteForm, CueNoteItem } from './CueNotes'
 import { formatClock } from './playbackSteps'
 import RunTimes from './RunTimes'
-import { fromLocalInput } from '../dates'
+import { formatLogTime, fromLocalInput } from '../dates'
 
 const KINDS = ['rehearsal', 'tech', 'preview', 'performance', 'other']
 
@@ -30,14 +30,17 @@ function logText(events, i) {
   return e.action === 'reset' ? '' : `Q${e.cue_number} ${e.cue_label}`
 }
 
-/** Events, cue notes and console events in one list, newest first, so the latest stays in view. */
-function logItems(events, notes, consoleEvents) {
+/**
+ * Events, cue notes and console events in one list, newest first, so the latest stays in view.
+ * Two of a kind in the same instant go by id, so the later one is still on top.
+ */
+export function logItems(events, notes, consoleEvents) {
   const items = [
-    ...events.map((e, i) => ({ key: `e${e.id}`, at: e.fired_at, i })),
-    ...notes.map((n) => ({ key: `n${n.id}`, at: n.created_at, note: n })),
-    ...consoleEvents.map((c) => ({ key: `c${c.id}`, at: c.at, console: c })),
+    ...events.map((e, i) => ({ key: `e${e.id}`, kind: 'e', id: e.id, at: e.fired_at, i })),
+    ...notes.map((n) => ({ key: `n${n.id}`, kind: 'n', id: n.id, at: n.created_at, note: n })),
+    ...consoleEvents.map((c) => ({ key: `c${c.id}`, kind: 'c', id: c.id, at: c.at, console: c })),
   ]
-  return items.sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
+  return items.sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || (a.kind === b.kind ? b.id - a.id : 0))
 }
 
 /** Pick, start or end a run, write cue notes, and show its log. */
@@ -181,12 +184,12 @@ export default function RunPanel({
             <CueNoteItem key={key} note={note} canEdit={canOperate} onEdit={onEditNote} onDelete={onDeleteNote} />
           ) : c ? (
             <li key={key} className={`log-console ${c.kind}`}>
-              <time>{new Date(c.at).toLocaleTimeString()}</time>
+              <time dateTime={c.at}>{formatLogTime(c.at)}</time>
               {c.text}
             </li>
           ) : (
             <li key={key}>
-              <time>{new Date(events[i].fired_at).toLocaleTimeString()}</time>
+              <time dateTime={events[i].fired_at}>{formatLogTime(events[i].fired_at)}</time>
               {events[i].action !== 'go' && <b className="log-action">{events[i].action.toUpperCase()} </b>}
               {logText(events, i)}
               {events[i].source === 'console' && <span className="log-source"> · Eos</span>}
