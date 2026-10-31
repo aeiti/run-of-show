@@ -29,3 +29,8 @@ def display_name(user):
         return user.profile.display_name
     except Profile.DoesNotExist:
         return ""
+
+
+def shown_name(user):
+    """The name to print for a user: their display name, else their username; "" for nobody."""
+    return (display_name(user) or user.get_username()) if user else ""

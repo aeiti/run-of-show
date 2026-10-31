@@ -301,12 +301,19 @@ class ConsoleEvent(models.Model):
 
 
 class CueNote(models.Model):
-    """A note about a cue in one run ("Q12 late"), apart from the cue's standing notes.
+    """An SM's performance note in one run ("Q12 late", "big laugh on the bell").
 
-    Unlike the event log these can be edited and deleted: they are working
-    notes, often written up after the run. The cue's number and label are
-    copied when the note is made, as on events, so the note still says which
-    cue it was about if the cue is renumbered or deleted.
+    Apart from the cue's standing notes (``Cue.notes``). Unlike the event log
+    these can be edited and deleted: they are working notes, often written up
+    after the run. The cue is optional: it is where the show was, copied with
+    its number and label when the note is made, as on events, so the note
+    still says which cue it was about if the cue is renumbered or deleted.
+
+    ``at`` is the moment the note is about. A note written live is stamped
+    when it was written; one added later (``added_later``) has a time only if
+    one was chosen for it. The report works out the run clock, the scene and
+    any hold from it. The follow-up is the explanation written after the
+    show, kept apart from the text written live.
     """
 
     run = models.ForeignKey(Run, on_delete=models.CASCADE, related_name="cue_notes")
@@ -317,6 +324,14 @@ class CueNote(models.Model):
     author = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
     )
+    at = models.DateTimeField(null=True, blank=True)
+    # Database defaults too, so a server still on the old code can insert notes.
+    added_later = models.BooleanField(default=False, db_default=False)
+    follow_up = models.TextField(max_length=4000, blank=True, default="", db_default="")
+    follow_up_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
+    )
+    follow_up_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

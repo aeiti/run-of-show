@@ -2,8 +2,9 @@ import { useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { api } from '../api'
 import { can } from '../access'
+import { findByNumber } from '../board/state'
 import { formatDateRange } from '../dates'
-import { cueText, lateness, length, parseAddresses, sceneName } from './reportText'
+import { cueText, lateness, length, noteMoment, noteWhere, parseAddresses, sceneName } from './reportText'
 
 const when = (iso) =>
   iso
@@ -107,26 +108,172 @@ function RunNotes({ runId, notes, canEdit, onSaved }) {
   )
 }
 
+/**
+ * One performance note: when and where it happened, the text written live,
+ * and the follow-up written afterwards. Operators write the follow-up; the
+ * live text stays as it was written.
+ */
+function PerformanceNote({ note, canEdit, onChanged }) {
+  const [draft, setDraft] = useState(null) // null: not writing the follow-up
+  const [error, setError] = useState('')
+  const where = noteWhere(note)
+
+  async function save(e) {
+    e.preventDefault()
+    setError('')
+    try {
+      await api.updateCueNote(note.id, { follow_up: draft.trim() })
+      setDraft(null)
+      onChanged()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  return (
+    <li>
+      <div className="note-stamp">
+        {note.at ? <time dateTime={note.at}>{clockTime(note.at)}</time> : <span>Time not set</span>}
+        {note.clock_seconds !== null && (
+          <span title="Run clock: time since the start, holds left out"> · {length(note.clock_seconds)}</span>
+        )}
+        {where && <span className="note-where"> · {where}</span>}
+        {note.in_hold && <span className="note-flag">{note.hold_reason ? `Held: ${note.hold_reason}` : 'Held'}</span>}
+        {note.added_later && <span className="note-flag">Added later</span>}
+      </div>
+      <p className="pre">
+        {note.text}
+        {note.author && <span className="muted"> ({note.author})</span>}
+      </p>
+      {draft === null ? (
+        <>
+          {note.follow_up && (
+            <p className="note-follow-up pre">
+              <em>Follow-up:</em> {note.follow_up}
+              {note.follow_up_by && <span className="muted"> ({note.follow_up_by})</span>}
+            </p>
+          )}
+          {canEdit && (
+            <button className="ghost small no-print" onClick={() => setDraft(note.follow_up)}>
+              {note.follow_up ? 'Edit follow-up' : 'Add follow-up'}
+            </button>
+          )}
+        </>
+      ) : (
+        <form className="report-note-form no-print" onSubmit={save}>
+          <textarea
+            autoFocus
+            rows={2}
+            maxLength={4000}
+            aria-label="Follow-up"
+            placeholder="What happened, what's being done about it"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => e.key === 'Escape' && setDraft(null)}
+          />
+          <div className="row">
+            <button type="submit" className="small" disabled={draft.trim() === note.follow_up}>
+              Save follow-up
+            </button>
+            <button type="button" className="ghost small" onClick={() => setDraft(null)}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      )}
+      {error && <p className="error no-print">{error}</p>}
+    </li>
+  )
+}
+
+/** A note not caught live, with a cue and a time of day if the SM knows them. */
+function AddLaterNote({ runId, cues, baseIso, onAdded }) {
+  const [text, setText] = useState('')
+  const [number, setNumber] = useState('')
+  const [time, setTime] = useState('')
+  const [error, setError] = useState('')
+  const cue = findByNumber(cues, number)
+  const cueOk = !number.trim() || cue
+
+  async function add(e) {
+    e.preventDefault()
+    if (!cueOk || !text.trim()) return
+    setError('')
+    try {
+      await api.addCueNote(runId, {
+        text: text.trim(),
+        cue: cue?.id ?? null,
+        at: noteMoment(time, baseIso),
+        added_later: true,
+      })
+      setText('')
+      setNumber('')
+      setTime('')
+      onAdded()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  return (
+    <form className="report-note-form no-print" onSubmit={add}>
+      <textarea
+        rows={2}
+        maxLength={2000}
+        aria-label="Note added later"
+        placeholder="A note not caught during the show"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+      />
+      <div className="row">
+        <input
+          className="narrow"
+          aria-label="Cue (optional)"
+          placeholder="Q#"
+          inputMode="decimal"
+          value={number}
+          onChange={(e) => setNumber(e.target.value)}
+        />
+        <input type="time" aria-label="Time (optional)" value={time} onChange={(e) => setTime(e.target.value)} />
+        <button type="submit" className="small" disabled={!cueOk || !text.trim()}>
+          Add note
+        </button>
+        {!cueOk && <span className="error">No Q{number} in the list.</span>}
+      </div>
+      {error && <p className="error">{error}</p>}
+    </form>
+  )
+}
+
 /** The show report for one run, laid out to print (or save as PDF) from the browser. */
 export default function Report({ productionId, runId }) {
   const [report, setReport] = useState(null)
+  const [cues, setCues] = useState([])
   const [role, setRole] = useState(null)
   const [error, setError] = useState('')
 
   useEffect(() => {
     let cancelled = false
-    Promise.all([api.report(runId), api.production(productionId)])
-      .then(([r, p]) => {
+    Promise.all([api.report(runId), api.production(productionId), api.cues(productionId)])
+      .then(([r, p, c]) => {
         if (cancelled) return
         if (r.production.id !== productionId) throw new Error('That run belongs to another production.')
         setReport(r)
         setRole(p.role)
+        setCues(c)
       })
       .catch((e) => setError(e.message))
     return () => {
       cancelled = true
     }
   }, [productionId, runId])
+
+  // After a note changes: the server works out each note's clock, scene and hold.
+  const refresh = () =>
+    api
+      .report(runId)
+      .then(setReport)
+      .catch((e) => setError(e.message))
 
   // The browser's print dialog names the PDF after the page title.
   useEffect(() => {
@@ -272,18 +419,23 @@ export default function Report({ productionId, runId }) {
         </section>
 
         <section>
-          <h2>Cue notes</h2>
-          {report.cue_notes.length === 0 ? (
-            <p className="muted">No cue notes.</p>
+          <h2>Performance notes</h2>
+          {report.performance_notes.length === 0 ? (
+            <p className="muted">No performance notes.</p>
           ) : (
-            <ul className="report-notes">
-              {report.cue_notes.map((n, i) => (
-                <li key={i}>
-                  <strong>{cueText(n.cue_number, n.cue_label)}</strong>: <span className="pre">{n.text}</span>
-                  {n.author && <span className="muted"> ({n.author})</span>}
-                </li>
+            <ol className="report-notes">
+              {report.performance_notes.map((n) => (
+                <PerformanceNote key={n.id} note={n} canEdit={can(role, 'operate')} onChanged={refresh} />
               ))}
-            </ul>
+            </ol>
+          )}
+          {can(role, 'operate') && (
+            <AddLaterNote
+              runId={runId}
+              cues={cues}
+              baseIso={run.started_at ?? run.scheduled_start ?? report.as_of}
+              onAdded={refresh}
+            />
           )}
         </section>
 

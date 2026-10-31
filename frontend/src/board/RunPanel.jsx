@@ -37,13 +37,14 @@ function logText(events, i) {
 export function logItems(events, notes, consoleEvents) {
   const items = [
     ...events.map((e, i) => ({ key: `e${e.id}`, kind: 'e', id: e.id, at: e.fired_at, i })),
-    ...notes.map((n) => ({ key: `n${n.id}`, kind: 'n', id: n.id, at: n.created_at, note: n })),
+    // A note added later from the report sits at the time chosen for it, if any.
+    ...notes.map((n) => ({ key: `n${n.id}`, kind: 'n', id: n.id, at: n.at ?? n.created_at, note: n })),
     ...consoleEvents.map((c) => ({ key: `c${c.id}`, kind: 'c', id: c.id, at: c.at, console: c })),
   ]
   return items.sort((a, b) => Date.parse(b.at) - Date.parse(a.at) || (a.kind === b.kind ? b.id - a.id : 0))
 }
 
-/** Pick, start or end a run, write cue notes, and show its log. */
+/** Pick, start or end a run, write performance notes, and show its log. */
 export default function RunPanel({
   runs,
   run,

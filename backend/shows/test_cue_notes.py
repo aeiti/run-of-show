@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
+from django.utils import timezone as django_timezone
 from rest_framework.test import APIClient
 
 from accounts.models import profile_for
@@ -89,13 +90,12 @@ def test_notes_can_be_written_after_the_run_ends(show):
 
 
 @pytest.mark.django_db
-def test_a_note_needs_text_and_a_cue_from_this_production(show, make_user):
+def test_a_note_needs_text_and_any_cue_from_this_production(show, make_user):
     client = client_for(show.owner)
     other = Production.objects.create(owner=show.owner, name="Other")
     stranger = Cue.objects.create(production=other, number=Decimal("1"))
 
     assert add_note(client, show.run, show.cues["1"], "").status_code == 400
-    assert client.post(f"/api/runs/{show.run.id}/notes/", {"text": "No cue"}, format="json").status_code == 400
     wrong = add_note(client, show.run, stranger)
     assert wrong.status_code == 400
     assert wrong.data["cue"] == ["That cue is not in this production."]
@@ -145,3 +145,108 @@ def test_notes_survive_a_backup_round_trip(show):
     assert restored == original
     assert restored[0]["created_at"] == when
     assert [n["cue__number"] for n in restored] == [Decimal("12"), None]
+
+
+@pytest.mark.django_db
+def test_a_note_needs_no_cue(show):
+    client = client_for(show.owner)
+    for body in ({"text": "Before the first GO"}, {"text": "At the act break", "cue": None}):
+        response = client.post(f"/api/runs/{show.run.id}/notes/", body, format="json")
+        assert response.status_code == 201
+        assert (response.data["cue"], response.data["cue_number"], response.data["cue_label"]) == (None, None, "")
+
+
+@pytest.mark.django_db
+def test_a_live_note_is_stamped_when_it_is_written(show):
+    client = client_for(show.owner)
+    before = django_timezone.now()
+    note = add_note(client, show.run, show.cues["1"]).data
+    stamped = CueNote.objects.get(pk=note["id"]).at
+    assert before <= stamped <= django_timezone.now()
+    assert note["added_later"] is False
+
+    # Its time can't be set, then or afterwards.
+    chosen = {"text": "Late", "at": "2026-03-14T19:40:00Z"}
+    assert client.post(f"/api/runs/{show.run.id}/notes/", chosen, format="json").status_code == 400
+    moved = client.patch(f"/api/cue-notes/{note['id']}/", {"at": "2026-03-14T19:40:00Z"}, format="json")
+    assert moved.status_code == 400
+    assert CueNote.objects.get(pk=note["id"]).at == stamped
+
+
+@pytest.mark.django_db
+def test_a_note_added_later_takes_a_time_or_none(show):
+    client = client_for(show.owner)
+    url = f"/api/runs/{show.run.id}/notes/"
+    timed = client.post(
+        url, {"text": "Missed the bell", "cue": show.cues["12"].id, "at": "2026-03-14T19:40:00Z", "added_later": True},
+        format="json",
+    ).data
+    untimed = client.post(url, {"text": "Thank you, crew", "added_later": True}, format="json").data
+    assert timed["at"] == "2026-03-14T19:40:00Z" and timed["cue_number"] == "12"
+    assert untimed["at"] is None
+
+    # Its time can be changed, but it stays a note added later.
+    moved = client.patch(f"/api/cue-notes/{timed['id']}/", {"at": "2026-03-14T19:41:00Z"}, format="json")
+    assert moved.status_code == 200 and moved.data["at"] == "2026-03-14T19:41:00Z"
+    flipped = client.patch(f"/api/cue-notes/{timed['id']}/", {"added_later": False}, format="json")
+    assert flipped.status_code == 400
+    assert CueNote.objects.get(pk=timed["id"]).added_later is True
+
+
+@pytest.mark.django_db
+def test_a_follow_up_records_who_wrote_it_and_keeps_the_live_text(show, make_user):
+    operator = make_user("olive")
+    Membership.objects.create(production=show.production, user=operator, role="operator")
+    note = add_note(client_for(show.owner), show.run, show.cues["1"], "Q1 late").data
+    assert (note["follow_up"], note["follow_up_by"], note["follow_up_at"]) == ("", "", None)
+
+    written = client_for(operator).patch(
+        f"/api/cue-notes/{note['id']}/", {"follow_up": "Board op missed the standby; fixed for tomorrow."}, format="json"
+    )
+    assert written.status_code == 200
+    assert (written.data["text"], written.data["author"]) == ("Q1 late", "alice")
+    assert (written.data["follow_up"], written.data["follow_up_by"]) == (
+        "Board op missed the standby; fixed for tomorrow.",
+        "olive",
+    )
+    assert written.data["follow_up_at"] is not None
+
+    # Editing only the text leaves the follow-up's author alone; clearing the follow-up clears them.
+    retyped = client_for(show.owner).patch(f"/api/cue-notes/{note['id']}/", {"text": "Q1 late (GO)"}, format="json")
+    assert retyped.data["follow_up_by"] == "olive"
+    cleared = client_for(show.owner).patch(f"/api/cue-notes/{note['id']}/", {"follow_up": ""}, format="json")
+    assert (cleared.data["follow_up"], cleared.data["follow_up_by"], cleared.data["follow_up_at"]) == ("", "", None)
+
+
+@pytest.mark.django_db
+def test_performance_notes_survive_a_backup_round_trip(show):
+    client = client_for(show.owner)
+    client.post(f"/api/runs/{show.run.id}/notes/", {"text": "No cue"}, format="json")
+    client.post(f"/api/runs/{show.run.id}/notes/", {"text": "Later", "added_later": True}, format="json")
+    first = CueNote.objects.get(text="No cue")
+    client.patch(f"/api/cue-notes/{first.id}/", {"follow_up": "Explained"}, format="json")
+
+    data = json.loads(client.get(f"/api/productions/{show.production.id}/export/").content)
+    copy = Production.objects.get(pk=client.post("/api/productions/import/", data, format="json").data["id"])
+
+    fields = ("text", "at", "added_later", "follow_up", "follow_up_at", "created_at")
+    original = list(CueNote.objects.filter(run__production=show.production).values(*fields))
+    assert list(CueNote.objects.filter(run__production=copy).values(*fields)) == original
+
+
+@pytest.mark.django_db
+def test_notes_from_an_older_backup_are_stamped_when_they_were_written(show):
+    client = client_for(show.owner)
+    add_note(client, show.run, show.cues["1"], "Old note")
+    data = json.loads(client.get(f"/api/productions/{show.production.id}/export/").content)
+    for run in data["runs"]:
+        for note in run["cue_notes"]:
+            for field in ("at", "added_later", "follow_up", "follow_up_at"):
+                del note[field]
+    when = "2026-03-14T19:45:00Z"
+    data["runs"][0]["cue_notes"][0]["created_at"] = when
+
+    copy = Production.objects.get(pk=client.post("/api/productions/import/", data, format="json").data["id"])
+    restored = CueNote.objects.get(run__production=copy)
+    assert restored.at == restored.created_at == datetime(2026, 3, 14, 19, 45, tzinfo=timezone.utc)
+    assert restored.added_later is False

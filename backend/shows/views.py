@@ -326,7 +326,7 @@ class RunViewSet(LiveUpdates, mixins.RetrieveModelMixin, mixins.UpdateModelMixin
 
     def get_queryset(self):
         return Run.objects.filter(production__in=visible_productions(self.request.user)).prefetch_related(
-            "events", "cue_notes__author__profile", "console_events"
+            "events", "cue_notes__author__profile", "cue_notes__follow_up_by__profile", "console_events"
         )
 
     def get_serializer_class(self):
@@ -384,11 +384,11 @@ class RunViewSet(LiveUpdates, mixins.RetrieveModelMixin, mixins.UpdateModelMixin
 
     @action(detail=True, methods=["get", "post"], url_path="notes")
     def cue_notes(self, request, pk=None):
-        """Notes on cues in this run. POST ``cue`` (an id) and ``text``; works on an ended run too."""
+        """Performance notes in this run. POST ``text``, and ``cue`` (an id) if it was at one; works on an ended run too."""
         run = self.get_object()
         if request.method == "GET":
-            return Response(CueNoteSerializer(run.cue_notes.select_related("author__profile"), many=True).data)
-        serializer = CueNoteSerializer(data=request.data, context={"run": run})
+            return Response(CueNoteSerializer(run.cue_notes.select_related("author__profile", "follow_up_by__profile"), many=True).data)
+        serializer = CueNoteSerializer(data=request.data, context={"run": run, "request": request})
         serializer.is_valid(raise_exception=True)
         serializer.save(run=run, author=request.user)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
@@ -430,7 +430,7 @@ class RunViewSet(LiveUpdates, mixins.RetrieveModelMixin, mixins.UpdateModelMixin
 
 
 class CueNoteViewSet(LiveUpdates, mixins.UpdateModelMixin, mixins.DestroyModelMixin, viewsets.GenericViewSet):
-    """Change a cue note's text, or delete it. Created through ``/runs/{id}/notes/``."""
+    """Change a performance note's text or follow-up, or delete it. Created through ``/runs/{id}/notes/``."""
 
     serializer_class = CueNoteSerializer
     permission_classes = ROLE_PERMISSIONS
@@ -447,7 +447,7 @@ class CueNoteViewSet(LiveUpdates, mixins.UpdateModelMixin, mixins.DestroyModelMi
 
     def get_queryset(self):
         return CueNote.objects.filter(run__production__in=visible_productions(self.request.user)).select_related(
-            "run__production", "author__profile"
+            "run__production", "author__profile", "follow_up_by__profile"
         )
 
 

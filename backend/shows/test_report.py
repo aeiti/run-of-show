@@ -90,7 +90,7 @@ def show():
         note = CueNote.objects.create(
             run=run, cue=cues[number], cue_number=cues[number].number, cue_label=cues[number].label, text=text, author=owner
         )
-        CueNote.objects.filter(pk=note.pk).update(created_at=at(20, minute))
+        CueNote.objects.filter(pk=note.pk).update(created_at=at(20, minute), at=at(20, minute))
     run.refresh_from_db()
     return SimpleNamespace(owner=owner, production=production, cues=cues, run=run)
 
@@ -143,11 +143,89 @@ def test_report_scene_lengths(show):
 @pytest.mark.django_db
 def test_report_notes_in_time_order(show):
     built = report.build(show.run)
-    assert [(n["cue_number"], n["text"], n["author"]) for n in built["cue_notes"]] == [
+    assert [(n["cue_number"], n["text"], n["author"]) for n in built["performance_notes"]] == [
         ("2", "Q2 early", "alice"),
         ("10", "Q10 late on the thunder", "alice"),
     ]
     assert built["notes"] == "Patron fell in row F at 19:50."
+
+
+def note(show, text, moment=None, cue=None, **fields):
+    """A note at ``moment`` (a live note), or with no time at all (one added later)."""
+    row = CueNote.objects.create(
+        run=show.run,
+        cue=show.cues.get(cue),
+        cue_number=Decimal(cue) if cue else None,
+        cue_label=f"Cue {cue}" if cue else "",
+        text=text,
+        at=moment,
+        **fields,
+    )
+    if moment:
+        CueNote.objects.filter(pk=row.pk).update(created_at=moment)
+    return row
+
+
+@pytest.mark.django_db
+def test_each_note_says_where_the_show_was(show):
+    note(show, "Big laugh on the bell", at(19, 45))
+    note(show, "Patron unwell, row F", at(19, 52))
+    note(show, "House still loading", at(19, 30))
+    note(show, "Fly bar: tech to check", cue="20", added_later=True)
+
+    built = {n["text"]: n for n in report.build(show.run)["performance_notes"]}
+    fields = ("cue_number", "scene", "clock_seconds", "in_hold", "hold_reason")
+    # No cue, so the scene is the last cue made active: Q5 at 19:40.
+    assert tuple(built["Big laugh on the bell"][f] for f in fields) == (None, "1.1 Lamp Room", 11 * 60.0, False, "")
+    # 18 minutes after the start, 2 of them held.
+    assert tuple(built["Patron unwell, row F"][f] for f in fields) == (
+        None, "1.1 Lamp Room", 16 * 60.0, True, "Audience medical"
+    )
+    # Before the start, in the hold for the late house, before any scene.
+    assert tuple(built["House still loading"][f] for f in fields) == (None, "", None, True, "Late house")
+    # Added later with a cue but no time: the cue gives the scene, and nothing else is known.
+    later = built["Fly bar: tech to check"]
+    assert tuple(later[f] for f in fields) == ("20", "1.2 Wreck", None, False, "")
+    assert (later["at"], later["added_later"]) == (None, True)
+
+
+@pytest.mark.django_db
+def test_notes_are_in_the_order_they_happened_and_those_without_a_time_come_last(show):
+    note(show, "No time", cue="1", added_later=True)
+    note(show, "Added for 19:41", at(19, 41), added_later=True)
+    note(show, "Live at 19:36", at(19, 36))
+    texts = [n["text"] for n in report.build(show.run)["performance_notes"]]
+    assert texts == ["Live at 19:36", "Added for 19:41", "Q2 early", "Q10 late on the thunder", "No time"]
+
+
+@pytest.mark.django_db
+def test_correcting_the_start_corrects_the_run_clock(show):
+    note(show, "At 19:45", at(19, 45))
+    Run.objects.filter(pk=show.run.pk).update(started_at=at(19, 40))
+    show.run.refresh_from_db()
+    built = next(n for n in report.build(show.run)["performance_notes"] if n["text"] == "At 19:45")
+    assert built["clock_seconds"] == 5 * 60.0
+
+
+@pytest.mark.django_db
+def test_the_email_shows_each_notes_stamps_flags_and_follow_up(show):
+    writer = get_user_model().objects.create_user(username="bob", password="pw-for-tests")
+    note(show, "Patron unwell, row F", at(19, 52), follow_up="FOH followed up; patron fine.", follow_up_by=writer)
+    note(show, "Fly bar <b>stuck</b>", cue="20", added_later=True)
+    built = report.build(show.run)
+
+    text = report.as_text(built)
+    for expected in [
+        "PERFORMANCE NOTES",
+        "  19:52:00 · 16:00  1.1 Lamp Room [in hold: Audience medical]",
+        "    Patron unwell, row F",
+        "    Follow-up: FOH followed up; patron fine. (bob)",
+        "  Added later  Q20 Cue 20 · 1.2 Wreck",
+    ]:
+        assert expected in text, expected
+    html = report.as_html(built)
+    assert "<h2>Performance notes</h2>" in html and "FOH followed up" in html
+    assert "<b>stuck</b>" not in html and "&lt;b&gt;stuck&lt;/b&gt;" in html
 
 
 @pytest.mark.django_db
@@ -215,7 +293,7 @@ def test_a_run_that_never_started(show):
     built = report.build(run)
     assert built["timing"] == {"late_seconds": None, "running_seconds": None, "held_in_run_seconds": None, "cues_fired": 0}
     assert built["holds"] == {"count": 0, "total_seconds": 0, "items": []}
-    assert built["scenes"] == [] and built["cue_notes"] == []
+    assert built["scenes"] == [] and built["performance_notes"] == []
     assert "Running time: –" in report.as_text(built)
 
 
@@ -295,7 +373,8 @@ def test_the_email_carries_the_report_as_text_and_html(show):
         "  1.1 Lamp Room: 30:00 (held 5:00)",
         "  19:50:00  5:00  Audience medical (at Q5)",
         "  20:20:00  10:00, not resumed  Fly bar stuck (at Q20)",
-        "  Q10 Cue 10: Q10 late on the thunder (alice)",
+        "  20:45:00 · 56:00  Q10 Cue 10 · 1.1 Lamp Room",
+        "    Q10 late on the thunder (alice)",
         "Kid <script>alert(1)</script> in row F",
     ]:
         assert expected in text, expected

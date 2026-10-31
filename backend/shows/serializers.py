@@ -6,9 +6,10 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
+from django.utils import timezone
 from rest_framework import serializers
 
-from accounts.models import display_name
+from accounts.models import display_name, shown_name
 
 from .access import role_for
 from . import uploads
@@ -291,31 +292,64 @@ class RunStateSerializer(serializers.Serializer):
 
 
 class CueNoteSerializer(serializers.ModelSerializer):
-    """A cue note in a run. The cue is set when the note is made; after that only the text changes."""
+    """A performance note in a run.
+
+    The cue (optional) is set when the note is made; after that the text and
+    the follow-up change. A note written live is stamped ``at`` the moment it
+    was made. One added later (``added_later``, from the report) may be given
+    an ``at`` of its own, and changed. Writing the follow-up records who
+    wrote it and when.
+    """
 
     cue_number = CueNumberField(read_only=True)
     author = serializers.SerializerMethodField()
+    follow_up_by = serializers.SerializerMethodField()
 
     class Meta:
         model = CueNote
-        fields = ["id", "run", "cue", "cue_number", "cue_label", "text", "author", "created_at", "updated_at"]
-        read_only_fields = ["id", "run", "cue_number", "cue_label", "created_at", "updated_at"]
-        extra_kwargs = {"cue": {"required": True, "allow_null": False}}
+        fields = [
+            "id", "run", "cue", "cue_number", "cue_label", "text", "author", "at", "added_later",
+            "follow_up", "follow_up_by", "follow_up_at", "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "run", "cue_number", "cue_label", "follow_up_at", "created_at", "updated_at"]
+        extra_kwargs = {"cue": {"required": False, "allow_null": True}}
 
     def get_author(self, note):
-        return (display_name(note.author) or note.author.get_username()) if note.author else ""
+        return shown_name(note.author)
+
+    def get_follow_up_by(self, note):
+        return shown_name(note.follow_up_by)
 
     def validate_cue(self, cue):
         if self.instance is not None and cue != self.instance.cue:
             raise serializers.ValidationError("A note's cue can't be changed. Delete it and add a new one.")
         run = self.context.get("run") or self.instance.run
-        if cue.production_id != run.production_id:
+        if cue is not None and cue.production_id != run.production_id:
             raise serializers.ValidationError("That cue is not in this production.")
         return cue
 
+    def validate(self, data):
+        if self.instance is not None and data.get("added_later", self.instance.added_later) != self.instance.added_later:
+            raise serializers.ValidationError({"added_later": "This can't be changed once the note is made."})
+        added_later = data.get("added_later", self.instance.added_later if self.instance else False)
+        if "at" in data and not added_later:
+            raise serializers.ValidationError({"at": "A note written live keeps the time it was written."})
+        return data
+
     def create(self, validated_data):
-        cue = validated_data["cue"]
-        return super().create({**validated_data, "cue_number": cue.number, "cue_label": cue.label})
+        cue = validated_data.get("cue")
+        if not validated_data.get("added_later"):
+            validated_data["at"] = timezone.now()
+        return super().create(
+            {**validated_data, "cue_number": cue.number if cue else None, "cue_label": cue.label if cue else ""}
+        )
+
+    def update(self, note, validated_data):
+        follow_up = validated_data.get("follow_up", note.follow_up)
+        if follow_up != note.follow_up:
+            validated_data["follow_up_by"] = self.context["request"].user if follow_up else None
+            validated_data["follow_up_at"] = timezone.now() if follow_up else None
+        return super().update(note, validated_data)
 
 
 class RunDetailSerializer(RunSerializer):
@@ -340,7 +374,7 @@ class ProductionFileSerializer(serializers.ModelSerializer):
         read_only_fields = fields
 
     def get_uploaded_by(self, f):
-        return (display_name(f.uploaded_by) or f.uploaded_by.get_username()) if f.uploaded_by else ""
+        return shown_name(f.uploaded_by)
 
 
 class FileUploadSerializer(serializers.Serializer):
@@ -445,8 +479,10 @@ class BackupEventSerializer(serializers.ModelSerializer):
 
 
 class BackupCueNoteSerializer(serializers.ModelSerializer):
-    # ``cue`` and ``cue_number`` as on events. The author isn't kept: the
-    # file may be imported where that user doesn't exist.
+    # ``cue`` and ``cue_number`` as on events. The author and the follow-up's
+    # author aren't kept: the file may be imported where they don't exist.
+    # Files from before performance notes have no ``at``: those notes were all
+    # written live, so the import stamps them with ``created_at``.
     cue = CueNumberField(source="cue.number", allow_null=True, required=False)
     cue_number = CueNumberField(allow_null=True, required=False)
     created_at = serializers.DateTimeField()
@@ -454,7 +490,10 @@ class BackupCueNoteSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CueNote
-        fields = ["cue", "cue_number", "cue_label", "text", "created_at", "updated_at"]
+        fields = [
+            "cue", "cue_number", "cue_label", "text", "at", "added_later", "follow_up", "follow_up_at",
+            "created_at", "updated_at",
+        ]
 
 
 class BackupRunSerializer(serializers.ModelSerializer):

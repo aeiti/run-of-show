@@ -15,6 +15,12 @@ made active, or the run ends. Going back into a scene starts it again, so a
 stopped and restarted rehearsal shows each pass. Scenes are found from the
 cue number recorded on each event against the current cue list, so a cue
 deleted since the run still counts towards the scene it was in.
+
+Performance notes are listed in the order they happened (``at``), each with
+where the show was: the run clock (playing time since the start, held time
+left out, as in the scene lengths), the scene, and the hold it was written
+in, if any. These are worked out from the note's time, so correcting the
+run's start corrects them. A note added later with no time comes last.
 """
 
 from bisect import bisect_right
@@ -22,7 +28,7 @@ from bisect import bisect_right
 from django.utils import timezone
 from django.utils.html import format_html, format_html_join
 
-from accounts.models import display_name
+from accounts.models import shown_name
 
 from .models import CueEvent, format_number
 
@@ -82,9 +88,8 @@ def _scene_lookup(cues):
     return scene_of
 
 
-def scenes(events, cues, until, hold_spans):
+def scenes(events, scene_of, until, hold_spans):
     """Each pass through a scene in run order, with its length and the time held within it."""
-    scene_of = _scene_lookup(cues)
     passes = []
     for event in events:
         if event.action not in MOVES or event.cue_number is None:
@@ -101,17 +106,59 @@ def scenes(events, cues, until, hold_spans):
     return passes
 
 
+def _playing_seconds(start, moment, spans):
+    """The run clock at ``moment``: time since the start, less the time held. None before the start."""
+    if start is None or moment < start:
+        return None
+    return round(_seconds(start, moment) - _overlap(start, moment, spans), 3)
+
+
+def performance_notes(notes, events, scene_of, start, found_holds, until):
+    """Each note in the order it happened, with the run clock, scene and hold at its moment."""
+    spans = [(h["started_at"], h["resumed_at"] or until) for h in found_holds]
+    moves = [e for e in events if e.action in MOVES and e.cue_number is not None]
+    items = []
+    for note in sorted(notes, key=lambda n: (n.at is None, n.at or n.created_at, n.id)):
+        moment = note.at
+        hold = None
+        if moment is not None:
+            hold = next((h for h in found_holds if h["started_at"] <= moment < (h["resumed_at"] or until)), None)
+        # The note's own cue, else the last cue made active before it.
+        number = note.cue_number
+        if number is None and moment is not None:
+            number = next((e.cue_number for e in reversed(moves) if e.fired_at <= moment), None)
+        items.append({
+            "id": note.id,
+            "cue_number": format_number(note.cue_number),
+            "cue_label": note.cue_label,
+            "scene": scene_of(number) if number is not None else "",
+            "text": note.text,
+            "author": shown_name(note.author),
+            "at": moment,
+            "clock_seconds": _playing_seconds(start, moment, spans) if moment else None,
+            "in_hold": hold is not None,
+            "hold_reason": hold["reason"] if hold else "",
+            "added_later": note.added_later,
+            "follow_up": note.follow_up,
+            "follow_up_by": shown_name(note.follow_up_by),
+            "follow_up_at": note.follow_up_at,
+            "created_at": note.created_at,
+            "updated_at": note.updated_at,
+        })
+    return items
+
+
 def build(run, now=None):
     """The report as plain data (datetimes and numbers), ready for a serializer or JSON."""
     production = run.production
     events = sorted(run.events.all(), key=lambda e: (e.fired_at, e.id))
-    notes = sorted(run.cue_notes.all(), key=lambda n: (n.created_at, n.id))
     as_of = now or timezone.now()
     until = run.ended_at or as_of
 
     found_holds = holds(events, until)
     spans = [(h["started_at"], h["resumed_at"] or until) for h in found_holds]
     start = run.started_at
+    scene_of = _scene_lookup(list(production.cues.all()))
     return {
         "as_of": as_of,
         "in_progress": run.ended_at is None,
@@ -144,17 +191,11 @@ def build(run, now=None):
             "total_seconds": round(sum(h["seconds"] for h in found_holds), 3),
             "items": found_holds,
         },
-        "scenes": scenes(events, list(production.cues.all()), until, spans),
-        "cue_notes": [
-            {
-                "cue_number": format_number(n.cue_number),
-                "cue_label": n.cue_label,
-                "text": n.text,
-                "author": (display_name(n.author) or n.author.get_username()) if n.author else "",
-                "created_at": n.created_at,
-            }
-            for n in notes
-        ],
+        "scenes": scenes(events, scene_of, until, spans),
+        "performance_notes": performance_notes(
+            run.cue_notes.select_related("author__profile", "follow_up_by__profile"),
+            events, scene_of, start, found_holds, until,
+        ),
         "notes": run.notes,
     }
 
@@ -222,6 +263,29 @@ def _cue(number, label):
     return " ".join(filter(None, [f"Q{number}" if number else "", label]))
 
 
+def _note_where(note):
+    return " · ".join(filter(None, [_cue(note["cue_number"], note["cue_label"]), note["scene"]]))
+
+
+def _note_stamp(note):
+    """The note's time of day and run clock, "19:42:10 · 0:08:10", or why it has none."""
+    if note["at"] is None:
+        return "Added later"
+    stamp = f"{timezone.localtime(note['at']):%H:%M:%S}"
+    if note["clock_seconds"] is not None:
+        stamp += f" · {clock(note['clock_seconds'])}"
+    return stamp
+
+
+def _note_flags(note):
+    flags = []
+    if note["in_hold"]:
+        flags.append(f"in hold: {note['hold_reason']}" if note["hold_reason"] else "in hold")
+    if note["added_later"] and note["at"] is not None:
+        flags.append("added later")
+    return ", ".join(flags)
+
+
 def as_text(report):
     production, run = report["production"], report["run"]
     lines = [
@@ -249,11 +313,18 @@ def as_text(report):
                 f"{hold['reason']}{f' (at {at})' if at else ''}"
             )
 
-    if report["cue_notes"]:
-        lines += ["", "CUE NOTES"]
-        for note in report["cue_notes"]:
+    if report["performance_notes"]:
+        lines += ["", "PERFORMANCE NOTES"]
+        for note in report["performance_notes"]:
+            where, flags = _note_where(note), _note_flags(note)
             by = f" ({note['author']})" if note["author"] else ""
-            lines.append(f"  {_cue(note['cue_number'], note['cue_label'])}: {note['text']}{by}")
+            lines.append(
+                f"  {_note_stamp(note)}{f'  {where}' if where else ''}{f' [{flags}]' if flags else ''}"
+            )
+            lines.append(f"    {note['text']}{by}")
+            if note["follow_up"]:
+                follow_by = f" ({note['follow_up_by']})" if note["follow_up_by"] else ""
+                lines.append(f"    Follow-up: {note['follow_up']}{follow_by}")
 
     if report["notes"]:
         lines += ["", "NOTES", report["notes"]]
@@ -301,12 +372,25 @@ def as_html(report):
                 for h in report["holds"]["items"]
             ),
         )))
-    if report["cue_notes"]:
-        parts.append(format_html("<h2>Cue notes</h2><ul>{}</ul>", format_html_join(
-            "",
-            "<li><b>{}</b>: {} <i>{}</i></li>",
-            ((_cue(n["cue_number"], n["cue_label"]), n["text"], n["author"]) for n in report["cue_notes"]),
-        )))
+    if report["performance_notes"]:
+        items = []
+        for n in report["performance_notes"]:
+            flags = _note_flags(n)
+            follow_up = format_html(
+                "<br><i>Follow-up:</i> <span style='white-space: pre-wrap'>{}</span> <i>{}</i>",
+                n["follow_up"],
+                n["follow_up_by"],
+            ) if n["follow_up"] else ""
+            items.append(format_html(
+                "<li><small>{}</small> <b>{}</b>{}<br><span style='white-space: pre-wrap'>{}</span> <i>{}</i>{}</li>",
+                _note_stamp(n),
+                _note_where(n),
+                f" [{flags}]" if flags else "",
+                n["text"],
+                n["author"],
+                follow_up,
+            ))
+        parts.append(format_html("<h2>Performance notes</h2><ul>{}</ul>", format_html_join("", "{}", ((i,) for i in items))))
     if report["notes"]:
         parts.append(format_html("<h2>Notes</h2><p style='white-space: pre-wrap'>{}</p>", report["notes"]))
     parts.append(format_html("<p><small>Report made {}.</small></p>", _when(report["as_of"])))
