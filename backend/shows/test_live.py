@@ -5,7 +5,7 @@ from asgiref.sync import sync_to_async
 from channels.testing import WebsocketCommunicator
 from rest_framework.authtoken.models import Token
 
-from config.asgi import application
+from config.asgi import application, router
 from shows.models import Membership
 from shows.tests import client_for
 
@@ -17,7 +17,7 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.django_db(transaction=True)]
 def allowed_origins(monkeypatch):
     # The validator copied CORS_ALLOWED_ORIGINS when asgi.py was imported, so a
     # settings override can't reach it, and a local .env may list other origins.
-    monkeypatch.setattr(application.application_mapping["websocket"], "allowed_origins", [ORIGIN[1].decode()])
+    monkeypatch.setattr(router.application_mapping["websocket"], "allowed_origins", [ORIGIN[1].decode()])
 
 
 @sync_to_async
