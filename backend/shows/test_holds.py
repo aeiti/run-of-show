@@ -1,8 +1,10 @@
+from datetime import timedelta
+
 import pytest
 from rest_framework.test import APIClient
 
-from shows import csv_io
-from shows.models import CueEvent, Membership
+from shows import csv_io, live
+from shows.models import CueEvent, CueNote, Membership
 
 
 def client_for(user):
@@ -123,3 +125,35 @@ def test_holds_are_in_the_csv_log(show):
     act(client, show.run, "resume")
     rows = [line.split(",") for line in csv_io.export_run(show.run).splitlines()[1:]]
     assert [(r[2], r[3], r[5]) for r in rows] == [("go", "1", ""), ("hold", "1", "Audience medical"), ("resume", "1", "")]
+
+
+@pytest.mark.django_db
+def test_a_resume_adds_a_note_about_the_hold(show, monkeypatch):
+    sent = []
+    monkeypatch.setattr(live, "broadcast", lambda production_id, message: sent.append(message))
+    show.cues["2"].scene = "1.2 Wreck"
+    show.cues["2"].save()
+    client = client_for(show.owner)
+    act(client, show.run, "go")
+    act(client, show.run, "go")
+    held = act(client, show.run, "hold", reason="Lost two movers")
+    hold = CueEvent.objects.get(pk=held.data["event"]["id"])
+    # Six minutes on hold.
+    CueEvent.objects.filter(pk=hold.pk).update(fired_at=hold.fired_at - timedelta(minutes=6))
+    act(client, show.run, "resume")
+
+    note = CueNote.objects.get(run=show.run)
+    assert note.text == "Held 6:00 in 1.2 Wreck at Q2: Lost two movers"
+    assert (note.cue, note.cue_number, note.show_cue, note.section) == (show.cues["2"], 2, False, "")
+    assert (note.at, note.author, note.added_later) == (hold.fired_at - timedelta(minutes=6), show.owner, False)
+    # Open boards hear about the note as well as the resume.
+    assert {"type": "notes", "run": show.run.id} in sent
+
+
+@pytest.mark.django_db
+def test_a_hold_before_any_cue_says_how_long_and_why(show):
+    client = client_for(show.owner)
+    act(client, show.run, "hold", reason="Late house")
+    act(client, show.run, "resume")
+    note = CueNote.objects.get(run=show.run)
+    assert (note.text, note.cue_number) == ("Held 0:00: Late house", None)

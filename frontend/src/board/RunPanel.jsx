@@ -50,6 +50,7 @@ export default function RunPanel({
   run,
   cues,
   canOperate,
+  noteSections,
   noteCueNumber,
   noteRef,
   onSelect,
@@ -174,7 +175,10 @@ export default function RunPanel({
         )}
       </div>
       {run && canOperate && (
-        <CueNoteForm cues={cues} defaultNumber={noteCueNumber} disabled={!run} onAdd={onAddNote} inputRef={noteRef} />
+        <CueNoteForm
+          cues={cues}
+          sections={noteSections}
+          defaultNumber={noteCueNumber} disabled={!run} onAdd={onAddNote} inputRef={noteRef} />
       )}
       <ol className="log">
         {events.length === 0 && notes.length === 0 && consoleEvents.length === 0 && (

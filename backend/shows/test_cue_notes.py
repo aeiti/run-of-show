@@ -250,3 +250,52 @@ def test_notes_from_an_older_backup_are_stamped_when_they_were_written(show):
     restored = CueNote.objects.get(run__production=copy)
     assert restored.at == restored.created_at == datetime(2026, 3, 14, 19, 45, tzinfo=timezone.utc)
     assert restored.added_later is False
+
+
+@pytest.mark.django_db
+def test_a_note_goes_in_one_of_the_productions_sections(show):
+    client = client_for(show.owner)
+    url = f"/api/runs/{show.run.id}/notes/"
+    note = client.post(url, {"text": "Q12 bumped", "cue": show.cues["12"].id, "section": "Lighting"}, format="json")
+    assert note.status_code == 201 and note.data["section"] == "Lighting"
+    assert note.data["show_cue"] is False
+    assert client.post(url, {"text": "Unsorted"}, format="json").data["section"] == ""
+
+    wrong = client.post(url, {"text": "x", "section": "Catering"}, format="json")
+    assert wrong.status_code == 400
+    assert wrong.data["section"] == ["'Catering' isn't one of this production's note sections."]
+
+    moved = client.patch(f"/api/cue-notes/{note.data['id']}/", {"section": "Sound", "show_cue": True}, format="json")
+    assert (moved.data["section"], moved.data["show_cue"]) == ("Sound", True)
+
+
+@pytest.mark.django_db
+def test_a_production_sets_its_own_note_sections(show, make_user):
+    client = client_for(show.owner)
+    url = f"/api/productions/{show.production.id}/"
+    assert client.get(url).data["note_sections"][:2] == ["Absences/Lateness", "Injury/Illness"]
+
+    saved = client.patch(url, {"note_sections": [" Performance ", "", "Technical"]}, format="json")
+    assert saved.status_code == 200 and saved.data["note_sections"] == ["Performance", "Technical"]
+    twice = client.patch(url, {"note_sections": ["Tech", "tech"]}, format="json")
+    assert twice.status_code == 400
+
+    # An operator can't change them; only those who edit the production.
+    operator = make_user("olive")
+    Membership.objects.create(production=show.production, user=operator, role="operator")
+    assert client_for(operator).patch(url, {"note_sections": ["Mine"]}, format="json").status_code == 403
+
+
+@pytest.mark.django_db
+def test_sections_and_old_run_notes_come_through_a_backup(show):
+    client = client_for(show.owner)
+    client.patch(f"/api/productions/{show.production.id}/", {"note_sections": ["Show", "Tech"]}, format="json")
+    client.post(f"/api/runs/{show.run.id}/notes/", {"text": "Q1 late", "section": "Tech"}, format="json")
+    data = json.loads(client.get(f"/api/productions/{show.production.id}/export/").content)
+    # A file from before 0016 carries the run's free-text notes.
+    data["runs"][0]["notes"] = "Patron fell in row F."
+
+    copy = Production.objects.get(pk=client.post("/api/productions/import/", data, format="json").data["id"])
+    assert copy.sections == ["Show", "Tech"]
+    notes = list(CueNote.objects.filter(run__production=copy).values_list("text", "section", "added_later"))
+    assert notes == [("Q1 late", "Tech", False), ("Patron fell in row F.", "Show", True)]

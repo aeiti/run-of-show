@@ -7,6 +7,8 @@ that event, so they still work if the active cue was renumbered or deleted.
 A HOLD pauses the run with a reason until a RESUME. Both are logged with the
 cue that was active, but neither moves it, and no cue action is accepted while
 the run is held. Ending a held run is allowed; the hold then lasts until the end.
+A resume also adds a performance note about the hold ("Held 6:00 in 1.2 Wreck
+at Q212: lost two movers"), for the SM to sort and expand in the report.
 
 The first GO or GOTO records when the run started (``Run.started_at``), unless
 an operator has already set it. A hold, a reset or a step back doesn't: none
@@ -16,7 +18,8 @@ of them fires a cue, and a hold before the top of the show is a late start.
 from django.db import transaction
 from django.utils import timezone
 
-from .models import Cue, CueEvent, Run
+from .models import Cue, CueEvent, CueNote, Run, format_number
+from .report import clock, scene_lookup
 
 
 class RunActionError(Exception):
@@ -156,12 +159,36 @@ def hold(run, reason):
     return _record_hold(run, CueEvent.Action.HOLD, reason)
 
 
+def hold_note_text(run, hold, resumed):
+    seconds = (resumed.fired_at - hold.fired_at).total_seconds()
+    parts = [f"Held {clock(seconds)}"]
+    if hold.cue_number is not None:
+        scene = scene_lookup(Cue.objects.filter(production=run.production_id))(hold.cue_number)
+        if scene:
+            parts.append(f"in {scene}")
+        parts.append(f"at Q{format_number(hold.cue_number)}")
+    text = " ".join(parts)
+    return f"{text}: {hold.note}" if hold.note else text
+
+
 @transaction.atomic
-def resume(run):
+def resume(run, author=None):
     run = _locked(run, held_ok=True)
-    if not current_hold(run):
+    hold = current_hold(run)
+    if not hold:
         raise RunActionError("The run is not on hold.", status=409)
-    return _record_hold(run, CueEvent.Action.RESUME)
+    resumed = _record_hold(run, CueEvent.Action.RESUME)
+    CueNote.objects.create(
+        run=run,
+        cue=hold.cue,
+        cue_number=hold.cue_number,
+        cue_label=hold.cue_label,
+        text=hold_note_text(run, hold, resumed),
+        author=author,
+        # The text already says where; ``show_cue`` would print it twice.
+        at=hold.fired_at,
+    )
+    return resumed
 
 
 def end(run):

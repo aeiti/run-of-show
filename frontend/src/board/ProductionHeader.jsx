@@ -17,7 +17,9 @@ export default function ProductionHeader({ production, onSaved, onDeleted, onPeo
   if (!production) return <h2>…</h2>
 
   function start() {
-    setDraft(Object.fromEntries(FIELDS.map((f) => [f, production[f] ?? ''])))
+    // The note sections are edited one per line.
+    const sections = (production.note_sections ?? []).join('\n')
+    setDraft({ ...Object.fromEntries(FIELDS.map((f) => [f, production[f] ?? ''])), note_sections: sections })
     setConfirmName(null)
     setError('')
     setEditing(true)
@@ -27,7 +29,8 @@ export default function ProductionHeader({ production, onSaved, onDeleted, onPeo
     e.preventDefault()
     try {
       const dates = { opening_date: draft.opening_date || null, closing_date: draft.closing_date || null }
-      onSaved(await api.updateProduction(production.id, { ...draft, ...dates }))
+      const note_sections = draft.note_sections.split('\n')
+      onSaved(await api.updateProduction(production.id, { ...draft, ...dates, note_sections }))
       setEditing(false)
     } catch (err) {
       setError(err.message)
@@ -113,6 +116,10 @@ export default function ProductionHeader({ production, onSaved, onDeleted, onPeo
         <label className="span-all">
           Notes
           <textarea rows={2} {...field('notes')} />
+        </label>
+        <label className="span-all">
+          Report note sections, one per line, in order
+          <textarea rows={5} {...field('note_sections')} />
         </label>
         <LogoField production={production} onSaved={onSaved} />
       </div>

@@ -18,7 +18,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from . import services, uploads
-from .models import Cue, CueEvent, CueNote, Production, Run
+from .models import SHOW_SECTION, Cue, CueEvent, CueNote, Production, Run
 from .serializers import (
     BACKUP_FORMAT,
     BACKUP_VERSION,
@@ -67,6 +67,7 @@ def import_production(owner, data, **details):
         created_at = run_data.pop("created_at")
         events = run_data.pop("events", [])
         notes = run_data.pop("cue_notes", [])
+        old_notes = run_data.pop("notes", "").strip()
         if "started_at" not in run_data:
             # A version 1 file has no start; as in migration 0012, it was the first GO.
             run_data["started_at"] = first_start(events, run_data.get("ended_at"))
@@ -93,6 +94,9 @@ def import_production(owner, data, **details):
                 note["at"] = created_at
             row = CueNote.objects.create(run=run, cue_id=cue_ids.get(linked), **note)
             CueNote.objects.filter(pk=row.pk).update(created_at=created_at, updated_at=updated_at)
+        if old_notes:
+            # As migration 0016 did for runs already in the database.
+            CueNote.objects.create(run=run, text=old_notes, added_later=True, section=SHOW_SECTION)
 
     # Last, so a failure earlier in the import can't leave a stored image with no production.
     if data.get("logo"):
