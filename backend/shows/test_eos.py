@@ -12,8 +12,8 @@ from rest_framework.authtoken.models import Token
 from config.asgi import application
 from shows import services
 from shows.console import Supervisor
-from shows.eos import LengthFramer, OSCError, Relay, SlipFramer, cue_fire, parse_packet
-from shows.models import CueEvent, EosConsole, Membership, Run
+from shows.eos import LengthFramer, OSCError, Relay, SlipFramer, cue_fire, describe, parse_packet
+from shows.models import ConsoleEvent, CueEvent, EosConsole, Membership, Run
 from shows.tests import client_for
 
 
@@ -127,12 +127,70 @@ def test_fires_are_recorded_as_go_and_going_back_as_goto(show, console):
     assert console.logs[-1] == ("Console fired Q12: GO Q12 Cue 12", False)
 
 
+def logged(run):
+    return [(c.kind, c.text) for c in ConsoleEvent.objects.filter(run=run).order_by("id")]
+
+
 @pytest.mark.django_db
-def test_ignores_other_cue_lists_other_events_and_stray_bytes(show, console):
-    console.send(fire("1", cue_list=2), fire("1", action="stop"), osc("/eos/out/active/cue/1/1", 0.5))
+def test_other_show_control_events_go_in_the_log_but_move_no_cue(show, console):
+    console.send(
+        fire("1", cue_list=2, label="Sound"),
+        fire("1", action="stop"),
+        fire("1", action="resume"),
+        osc("/eos/out/event/macro/12"),
+        osc("/eos/out/event/sub/3", 1),
+        osc("/eos/out/event/show/saved", "C:/shows/mexodus.esf"),
+        osc("/eos/out/active/cue/1/1", 0.5),  # fade progress: not an event
+        osc("/eos/out/pending/cue/1/2"),  # state, not an event
+    )
     assert console.relay.handle(b"hello") is False
     assert recorded(show.run) == []
+    assert logged(show.run) == [
+        ("show_control", "Eos fired list 2 Q1 Sound"),
+        ("show_control", "Eos stopped list 1 Q1"),
+        ("show_control", "Eos resumed list 1 Q1"),
+        ("show_control", "Eos ran macro 12"),
+        ("show_control", "Eos submaster 3 bump on"),
+        ("show_control", "Eos show saved: C:/shows/mexodus.esf"),
+    ]
     assert console.logs == []
+
+
+@pytest.mark.django_db
+def test_recorded_fires_say_the_console_fired_them_and_skipped_ones_are_logged(show, console):
+    console.send(fire("1"), fire("7.5"))
+    event = CueEvent.objects.get(run=show.run)
+    assert (event.action, event.source) == ("go", "console")
+    assert logged(show.run) == [("show_control", "Console fired Q7.5; not recorded. Q7.5 isn't in this production's cue list.")]
+    detail = client_for(show.owner).get(f"/api/runs/{show.run.id}/").data
+    assert detail["events"][0]["source"] == "console"
+    assert detail["console_events"][0]["text"].startswith("Console fired Q7.5")
+
+
+@pytest.mark.django_db
+def test_with_no_run_open_nothing_is_logged(show, console):
+    show.run.ended_at = show.run.created_at
+    show.run.save()
+    console.send(osc("/eos/out/event/macro/1"))
+    assert not ConsoleEvent.objects.exists()
+
+
+@pytest.mark.django_db
+def test_the_run_export_includes_console_events_in_time_order(show, console):
+    console.send(fire("1"), osc("/eos/out/event/macro/4"))
+    rows = client_for(show.owner).get(f"/api/runs/{show.run.id}/export/").content.decode().splitlines()
+    assert rows[0].endswith(",note,source")
+    assert rows[1].split(",")[2:] == ["go", "1", "Cue 1", "", "console"]
+    assert rows[2].split(",")[2:] == ["console", "", "", "Eos ran macro 4", "show_control"]
+
+
+def test_describe_names_eos_events_and_ignores_the_rest():
+    assert describe("/eos/out/event/cue/1/12.5/fire", ["Lightning"]) == "Eos fired list 1 Q12.5 Lightning"
+    assert describe("/eos/out/event/relay/2/1", [0]) == "Eos relay 2 group 1 on"
+    assert describe("/eos/out/event/sub/4", [0]) == "Eos submaster 4 bump off"
+    assert describe("/eos/out/event/something/new", [3]) == "Eos /eos/out/event/something/new 3"
+    assert describe("/eos/out/active/cue", [0.5]) is None
+    assert describe("/eos/out/user", [1]) is None
 
 
 @pytest.mark.django_db
@@ -247,6 +305,11 @@ def events(run):
     return recorded(run)
 
 
+@database_sync_to_async
+def console_log(run):
+    return logged(run)
+
+
 async def board(production, user):
     socket_ = WebsocketCommunicator(application, f"/ws/productions/{production.id}/", headers=[(b"origin", b"http://localhost:3200")])
     assert (await socket_.connect())[0]
@@ -304,6 +367,15 @@ async def test_a_udp_console_fire_reaches_open_boards(show, local_bind):
     await supervisor.apply(show.production.id)
     assert (await until(screen, lambda m: m["type"] == "console"))["status"]["state"] == "off"
     assert supervisor.recent(show.production.id) == []
+    # The listener's start and stop are in the run's log.
+    for _ in range(40):
+        if len(await console_log(show.run)) == 2:
+            break
+        await asyncio.sleep(0.05)
+    assert await console_log(show.run) == [
+        ("network", f"Listening on UDP port {port}"),
+        ("network", "Stopped following the console"),
+    ]
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.bind(("127.0.0.1", port))
     await supervisor.stop_all()
@@ -352,6 +424,7 @@ async def test_a_tcp_console_is_read_from_and_sent_nothing(show, framing):
         await asyncio.sleep(0.05)
     assert await events(show.run) == [("go", "1")]
     assert supervisor.status(show.production.id)["state"] == "connected"
+    assert (await console_log(show.run))[0] == ("network", f"Connected to 127.0.0.1:{port} (TCP)")
     await supervisor.stop_all()
     await asyncio.sleep(0.1)
     server.close()

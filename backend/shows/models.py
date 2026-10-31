@@ -245,6 +245,8 @@ class CueEvent(models.Model):
     cue_label = models.CharField(max_length=200, blank=True)
     fired_at = models.DateTimeField(auto_now_add=True)
     note = models.CharField(max_length=500, blank=True)
+    # "console" when an Eos console fired the cue (see console.py); empty for the board.
+    source = models.CharField(max_length=10, blank=True)
 
     class Meta:
         ordering = ["fired_at", "id"]
@@ -259,6 +261,43 @@ class CueEvent(models.Model):
 
     def __str__(self):
         return f"{self.run.label}: {self.action} Q{format_number(self.cue_number)} @ {self.fired_at:%H:%M:%S}"
+
+
+class ConsoleEvent(models.Model):
+    """Something the production's Eos console sent, or its connection did, during a run.
+
+    Cues the console fires that are recorded become ordinary ``CueEvent`` rows
+    (with ``source="console"``). Everything else worth seeing in the log comes
+    here: cues stopped or resumed, fires that couldn't be recorded, fires on
+    other cue lists, macros, submasters, relays, show file events, and the
+    listener starting, connecting, losing the console or hitting a problem.
+    Insert-only, like the event log.
+    """
+
+    class Kind(models.TextChoices):
+        SHOW_CONTROL = "show_control"
+        NETWORK = "network"
+
+    run = models.ForeignKey(Run, on_delete=models.CASCADE, related_name="console_events")
+    kind = models.CharField(max_length=20, choices=Kind.choices)
+    text = models.CharField(max_length=500)
+    # The OSC address, for show control events.
+    address = models.CharField(max_length=300, blank=True)
+    at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["at", "id"]
+
+    def save(self, *args, **kwargs):
+        if not self._state.adding:
+            raise AppendOnlyError("ConsoleEvent rows are insert-only.")
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise AppendOnlyError("ConsoleEvent rows are insert-only.")
+
+    def __str__(self):
+        return f"{self.run.label}: {self.text}"
 
 
 class CueNote(models.Model):

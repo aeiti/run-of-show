@@ -30,11 +30,12 @@ function logText(events, i) {
   return e.action === 'reset' ? '' : `Q${e.cue_number} ${e.cue_label}`
 }
 
-/** Events and cue notes in one list, newest first, so the latest stays in view. */
-function logItems(events, notes) {
+/** Events, cue notes and console events in one list, newest first, so the latest stays in view. */
+function logItems(events, notes, consoleEvents) {
   const items = [
     ...events.map((e, i) => ({ key: `e${e.id}`, at: e.fired_at, i })),
     ...notes.map((n) => ({ key: `n${n.id}`, at: n.created_at, note: n })),
+    ...consoleEvents.map((c) => ({ key: `c${c.id}`, at: c.at, console: c })),
   ]
   return items.sort((a, b) => Date.parse(b.at) - Date.parse(a.at))
 }
@@ -82,6 +83,7 @@ export default function RunPanel({
 
   const events = run?.events ?? []
   const notes = run?.cue_notes ?? []
+  const consoleEvents = run?.console_events ?? []
 
   return (
     <section className="run-panel">
@@ -172,15 +174,23 @@ export default function RunPanel({
         <CueNoteForm cues={cues} defaultNumber={noteCueNumber} disabled={!run} onAdd={onAddNote} inputRef={noteRef} />
       )}
       <ol className="log">
-        {events.length === 0 && notes.length === 0 && <li className="muted">Nothing fired in this run yet.</li>}
-        {logItems(events, notes).map(({ key, i, note }) =>
+        {events.length === 0 && notes.length === 0 && consoleEvents.length === 0 && (
+          <li className="muted">Nothing fired in this run yet.</li>
+        )}
+        {logItems(events, notes, consoleEvents).map(({ key, i, note, console: c }) =>
           note ? (
             <CueNoteItem key={key} note={note} canEdit={canOperate} onEdit={onEditNote} onDelete={onDeleteNote} />
+          ) : c ? (
+            <li key={key} className={`log-console ${c.kind}`}>
+              <time>{new Date(c.at).toLocaleTimeString()}</time>
+              {c.text}
+            </li>
           ) : (
             <li key={key}>
               <time>{new Date(events[i].fired_at).toLocaleTimeString()}</time>
               {events[i].action !== 'go' && <b className="log-action">{events[i].action.toUpperCase()} </b>}
               {logText(events, i)}
+              {events[i].source === 'console' && <span className="log-source"> · Eos</span>}
             </li>
           ),
         )}

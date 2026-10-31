@@ -270,20 +270,17 @@ def export_cues(production):
 
 
 def export_run(run):
+    """Cue actions and console events in time order. ``source`` is "console" for
+    cues the console fired; console events have the action "console"."""
     out = io.StringIO()
     writer = csv.writer(out)
-    writer.writerow(["fired_at", "seconds_from_start", "action", "cue_number", "cue_label", "note"])
+    writer.writerow(["fired_at", "seconds_from_start", "action", "cue_number", "cue_label", "note", "source"])
+    rows = [
+        (e.fired_at, e.action, format_number(e.cue_number) or "", e.cue_label, e.note, e.source) for e in run.events.all()
+    ] + [(c.at, "console", "", "", c.text, c.kind) for c in run.console_events.all()]
+    rows.sort(key=lambda r: r[0])
     start = None
-    for event in run.events.all():
-        start = start or event.fired_at
-        writer.writerow(
-            [
-                event.fired_at.isoformat(),
-                f"{(event.fired_at - start).total_seconds():.1f}",
-                event.action,
-                format_number(event.cue_number) or "",
-                event.cue_label,
-                event.note,
-            ]
-        )
+    for at, *rest in rows:
+        start = start or at
+        writer.writerow([at.isoformat(), f"{(at - start).total_seconds():.1f}", *rest])
     return out.getvalue()

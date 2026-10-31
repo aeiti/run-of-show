@@ -29,8 +29,8 @@ from django.db import transaction
 from django.db.models.signals import post_delete, post_save
 
 from . import live
-from .eos import LengthFramer, OSCError, Relay, SlipFramer, parse_packet
-from .models import EosConsole
+from .eos import LengthFramer, OSCError, Relay, SlipFramer, log_console_event, parse_packet
+from .models import ConsoleEvent, EosConsole
 
 log = logging.getLogger(__name__)
 
@@ -73,6 +73,7 @@ class Listener:
         self.transport = None
         self.tasks = []
         self.heard = None
+        self.logged = None  # the last line this listener put in the run log
 
     async def start(self):
         self.tasks.append(asyncio.create_task(self.work()))
@@ -97,7 +98,21 @@ class Listener:
         await asyncio.gather(*self.tasks, return_exceptions=True)
 
     def set(self, **changes):
+        before = self.supervisor.status(self.production_id)
         self.supervisor.update(self.production_id, **changes)
+        if "state" in changes:
+            self.log_network(before, self.supervisor.status(self.production_id))
+
+    def log_network(self, before, after):
+        """Put the connection's ups and downs in the run log, once each."""
+        text = None
+        if after["state"] in ("listening", "connected", "error"):
+            text = after["detail"]
+        elif after["state"] == "connecting" and before["state"] == "connected":
+            text = f"Lost the connection to {describe(self.config)}"
+        if text and text != self.logged:
+            self.logged = text
+            self.supervisor.log(self.production_id, text)
 
     def note(self, text, problem):
         """From the relay, in the database thread."""
@@ -210,6 +225,8 @@ class Supervisor:
             if old is not None:
                 await old.stop()
             config = await database_sync_to_async(lambda: EosConsole.objects.filter(pk=production_id).first())()
+            if old is not None and (config is None or not config.enabled):
+                self.log(production_id, "Stopped following the console")
             if config is None or not config.enabled:
                 self.statuses.pop(production_id, None)
                 self.recents.pop(production_id, None)
@@ -227,6 +244,12 @@ class Supervisor:
 
     def status(self, production_id):
         return self.statuses.get(production_id, {"state": "off", "detail": "", "heard": None, "problem": "", "problem_at": None})
+
+    def log(self, production_id, text):
+        """A network line in the open run's log, from the event loop."""
+        self.loop.create_task(
+            database_sync_to_async(log_console_event)(production_id, ConsoleEvent.Kind.NETWORK, text)
+        )
 
     def remember(self, production_id, entry):
         if production_id in self.recents:

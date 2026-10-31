@@ -61,13 +61,14 @@ def run_state(run):
     }
 
 
-def _record(run, action, cue):
+def _record(run, action, cue, source=""):
     event = CueEvent.objects.create(
         run=run,
         action=action,
         cue=cue,
         cue_number=cue.number if cue else None,
         cue_label=cue.label if cue else "",
+        source=source,
     )
     if action in STARTS and run.started_at is None:
         run.started_at = event.fired_at
@@ -93,11 +94,11 @@ def _own_cue(run, cue_id):
 
 
 @transaction.atomic
-def go(run, cue_id=None):
+def go(run, cue_id=None, source=""):
     """Fire the loaded cue if one is given, otherwise the cue after the active one."""
     run = _locked(run)
     if cue_id is not None:
-        return _record(run, CueEvent.Action.GO, _own_cue(run, cue_id))
+        return _record(run, CueEvent.Action.GO, _own_cue(run, cue_id), source)
     cues = Cue.objects.filter(production=run.production_id)
     number = active_number(run)
     cue = cues.first() if number is None else cues.filter(number__gt=number).first()
@@ -119,9 +120,9 @@ def back(run):
 
 
 @transaction.atomic
-def goto(run, cue_id):
+def goto(run, cue_id, source=""):
     run = _locked(run)
-    return _record(run, CueEvent.Action.GOTO, _own_cue(run, cue_id))
+    return _record(run, CueEvent.Action.GOTO, _own_cue(run, cue_id), source)
 
 
 @transaction.atomic

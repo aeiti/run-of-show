@@ -18,7 +18,7 @@ import time
 from decimal import Decimal, InvalidOperation
 
 from . import live, services
-from .models import Cue, Run
+from .models import ConsoleEvent, Cue, Run
 from .serializers import CueEventSerializer, RunStateSerializer
 
 CUE_EVENT = re.compile(r"^/eos/out/event/cue/(?P<list>\d+)/(?P<number>[0-9.]+)/(?P<action>fire|stop|resume)$", re.I)
@@ -163,17 +163,64 @@ def plan(production, number):
     return run, action, cue
 
 
+def _cue(number):
+    return f"Q{Decimal(number).normalize():f}"
+
+
+def describe(address, args):
+    """A line for the run log about an Eos show control event, or None for anything else.
+
+    These are the ``/eos/out/event/...`` messages Eos sends as it acts (Eos
+    online help, OSC Show Control and OSC Dictionary > OSC Outputs).
+    """
+    parts = address.strip("/").split("/")
+    if [p.lower() for p in parts[:3]] != ["eos", "out", "event"]:
+        return None
+    what = [p.lower() for p in parts[3:]]
+    first = args[0] if args else None
+    try:
+        if len(what) == 4 and what[0] == "cue":
+            label = f" {first}" if isinstance(first, str) and first else ""
+            action = {"fire": "fired", "stop": "stopped", "resume": "resumed"}.get(what[3], what[3])
+            return f"Eos {action} list {what[1]} {_cue(what[2])}{label}"
+        if len(what) == 2 and what[0] == "macro":
+            return f"Eos ran macro {what[1]}"
+        if len(what) == 2 and what[0] == "sub":
+            state = {1: " bump on", 0: " bump off"}.get(first, "")
+            return f"Eos submaster {what[1]}{state}"
+        if len(what) == 3 and what[0] == "relay":
+            # The dictionary documents 0 as on and 1 as off.
+            state = {0: " on", 1: " off"}.get(first, "")
+            return f"Eos relay {what[1]} group {what[2]}{state}"
+        if len(what) == 2 and what[0] == "show":
+            path = f": {first}" if isinstance(first, str) and first else ""
+            return f"Eos show {what[1]}{path}"
+    except InvalidOperation:
+        pass
+    return f"Eos {address}" + (f" {' '.join(map(str, args))}" if args else "")
+
+
+def log_console_event(production_id, kind, text, address=""):
+    """Add a line to the open run's log and tell its boards. Nothing if no run is open."""
+    run = Run.objects.filter(production=production_id, ended_at__isnull=True).order_by("-created_at", "-id").first()
+    if run is None:
+        return None
+    event = ConsoleEvent.objects.create(run=run, kind=kind, text=text[:500], address=address[:300])
+    live.broadcast(production_id, {"type": "console.log", "run": run.id})
+    return event
+
+
 class Repeats:
-    """Recognises the same fire arriving again within ``REPEAT_WINDOW``."""
+    """Recognises the same event arriving again within ``REPEAT_WINDOW``."""
 
     def __init__(self, clock=time.monotonic):
         self.clock = clock
-        self.last = None  # (cue list, number, when)
+        self.last = None  # (address, when)
 
-    def seen(self, cue_list, number):
+    def seen(self, address):
         now = self.clock()
-        repeat = self.last is not None and self.last[:2] == (cue_list, number) and now - self.last[2] < REPEAT_WINDOW
-        self.last = (cue_list, number, now)
+        repeat = self.last is not None and self.last[0] == address.lower() and now - self.last[1] < REPEAT_WINDOW
+        self.last = (address.lower(), now)
         return repeat
 
 
@@ -191,27 +238,31 @@ class Relay:
         self.repeats = Repeats(clock)
 
     def handle(self, data):
-        """Record any cue fires in ``data``. False if it wasn't OSC."""
+        """Record any cue fires in ``data``, and log its other show control events. False if it wasn't OSC."""
         try:
             messages = parse_packet(data)
         except OSCError:
             return False
-        for address, _args in messages:
+        for address, args in messages:
+            text = describe(address, args)
+            if text is None or self.repeats.seen(address):
+                continue
             fire = cue_fire(address)
-            if fire is None or fire[0] != self.cue_list:
-                continue
-            if self.repeats.seen(*fire):
-                continue
-            self.record(fire[1])
+            if fire is not None and fire[0] == self.cue_list:
+                self.record(fire[1], address)
+            else:
+                log_console_event(self.production_id, ConsoleEvent.Kind.SHOW_CONTROL, text, address)
         return True
 
-    def record(self, number):
+    def record(self, number, address=""):
         name = f"Q{number.normalize():f}"
         try:
             run, action, cue = plan(self.production_id, number)
-            event = (services.go if action == "go" else services.goto)(run, cue.id)
+            event = (services.go if action == "go" else services.goto)(run, cue.id, source="console")
         except (Skip, services.RunActionError) as e:
-            self.log(f"Console fired {name}; not recorded. {e}", True)
+            text = f"Console fired {name}; not recorded. {e}"
+            self.log(text, True)
+            log_console_event(self.production_id, ConsoleEvent.Kind.SHOW_CONTROL, text, address)
             return
         # The same message the API sends for a GO from a board (see RunViewSet.live_message).
         live.broadcast(
