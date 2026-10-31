@@ -89,6 +89,15 @@ export default function ConsoleDialog({ productionId, info, onSaved, onClose }) 
     }
   }
 
+  // While the dialog is open, what the listener has received, refreshed every two seconds.
+  const [recent, setRecent] = useState(info.recent ?? [])
+  useEffect(() => {
+    const timer = setInterval(() => {
+      api.console(productionId).then((latest) => setRecent(latest.recent ?? []), () => {})
+    }, 2000)
+    return () => clearInterval(timer)
+  }, [productionId])
+
   const here = window.location.hostname
   const status = info.status
 
@@ -171,7 +180,34 @@ export default function ConsoleDialog({ productionId, info, onSaved, onClose }) 
               <> turn on OSC RX and OSC TX, and set the OSC TCP mode to match. The app connects and only reads.</>
             )}{' '}
             Leave OSC Cue Send String empty.
+            {udp && (
+              <span className="muted">
+                {' '}
+                Running the app in Docker? Only UDP ports 4703 to 4727 reach it, so pick one of those.
+              </span>
+            )}
           </div>
+
+          {status.state !== 'off' && (
+            <div className="console-recent">
+              <h3>Received</h3>
+              {recent.length === 0 ? (
+                <p className="muted small-print">
+                  Nothing yet. Fire a cue on the console; if nothing shows here, the console&apos;s messages aren&apos;t
+                  reaching the server.
+                </p>
+              ) : (
+                <ol>
+                  {recent.map((r, i) => (
+                    <li key={recent.length - i} className={r.problem ? 'problem' : r.result ? 'result' : ''}>
+                      <time>{new Date(r.at).toLocaleTimeString()}</time>
+                      {r.result ?? r.note ?? `${r.address} ${r.args.map((a) => JSON.stringify(a)).join(' ')}`}
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+          )}
 
           {errors.detail && <p className="error">{errors.detail}</p>}
           <div className="row">

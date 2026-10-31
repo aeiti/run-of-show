@@ -287,11 +287,23 @@ async def test_a_udp_console_fire_reaches_open_boards(show, local_bind):
     assert (event["run"], event["event"]["action"], event["event"]["cue_number"]) == (show.run.id, "go", "1")
     assert event["state"]["active_number"] == "1"
     assert await events(show.run) == [("go", "1")]
+    # The message and what came of it, newest first, for the settings dialog.
+    recent = supervisor.recent(show.production.id)
+    assert recent[0]["result"] == "Console fired Q1: GO Q1 Cue 1" and recent[0]["problem"] is False
+    assert (recent[1]["address"], recent[1]["args"]) == ("/eos/out/event/cue/1/1/fire", [""])
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.sendto(b"GO 2", ("127.0.0.1", port))
+    for _ in range(40):
+        if supervisor.recent(show.production.id)[0].get("note"):
+            break
+        await asyncio.sleep(0.05)
+    assert supervisor.recent(show.production.id)[0]["note"] == "4 bytes from 127.0.0.1, not OSC"
 
     # Turning it off frees the port and tells the boards.
     await configure(show.production, enabled=False, port=port)
     await supervisor.apply(show.production.id)
     assert (await until(screen, lambda m: m["type"] == "console"))["status"]["state"] == "off"
+    assert supervisor.recent(show.production.id) == []
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
         s.bind(("127.0.0.1", port))
     await supervisor.stop_all()

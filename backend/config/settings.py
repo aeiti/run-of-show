@@ -97,6 +97,16 @@ CHANNEL_LAYERS = {'default': {'BACKEND': 'channels.layers.InMemoryChannelLayer'}
 EOS_LISTENERS = os.environ.get('EOS_LISTENERS', 'true').lower() != 'false'
 EOS_BIND_ADDRESS = os.environ.get('EOS_BIND_ADDRESS', '0.0.0.0')
 
+# Every OSC message a console listener receives, and what it recorded, goes to
+# the server's output (docker logs, or the runserver terminal).
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {'console': {'format': '%(asctime)s %(message)s', 'datefmt': '%H:%M:%S'}},
+    'handlers': {'console': {'class': 'logging.StreamHandler', 'formatter': 'console'}},
+    'loggers': {'shows.console': {'handlers': ['console'], 'level': 'INFO', 'propagate': False}},
+}
+
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
