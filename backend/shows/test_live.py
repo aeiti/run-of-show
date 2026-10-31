@@ -13,6 +13,13 @@ ORIGIN = (b"origin", b"http://localhost:3200")
 pytestmark = [pytest.mark.asyncio, pytest.mark.django_db(transaction=True)]
 
 
+@pytest.fixture(autouse=True)
+def allowed_origins(monkeypatch):
+    # The validator copied CORS_ALLOWED_ORIGINS when asgi.py was imported, so a
+    # settings override can't reach it, and a local .env may list other origins.
+    monkeypatch.setattr(application.application_mapping["websocket"], "allowed_origins", [ORIGIN[1].decode()])
+
+
 @sync_to_async
 def token_for(user):
     return Token.objects.get_or_create(user=user)[0].key
