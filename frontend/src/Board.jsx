@@ -17,7 +17,7 @@ import RunPanel from './board/RunPanel'
 import ScriptViewer from './board/ScriptViewer'
 import Transport from './board/Transport'
 import { currentScript } from './board/files'
-import { extraTotal, fadeFor, formatSeconds, formatTime } from './board/cueTime'
+import { extraTotal, fadeFor, fadeSeconds, formatSeconds, formatTime, progressFade } from './board/cueTime'
 import { FLASH, LOOK, STATUS, playheadPos } from './board/looks'
 import { cueStates, findByNumber, playheadIndex, sortCues, stepLoad } from './board/state'
 import { sceneSpans, trackLabels } from './board/track'
@@ -30,7 +30,8 @@ gsap.ticker.lagSmoothing(0)
 // GSAP owns each card's look (on .cue-inner); React only renders content.
 // The entrance animates the outer <li>, so the two never tween the same property.
 // Each card's .cue-fade bar fills over the cue's time after it goes, so the
-// operator can see when a cue has finished; a later action cuts it off.
+// operator can see when a cue has finished; a later action cuts it off. When
+// Eos reports the cue's progress, the bar follows that instead.
 
 export default function Board({ productionId, runId, me, onBack, onSelectRun, onSignedOut }) {
   const [production, setProduction] = useState(null)
@@ -64,6 +65,8 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
   // Event ids already on the board. An action can arrive twice, from its own
   // response and from the live socket (in either order); it plays once.
   const seenEvents = useRef(new Set())
+  // Eos's last progress sample, for its pace when the next one doesn't say the time left.
+  const lastProgress = useRef(null)
 
   const cueList = useMemo(() => cues ?? [], [cues])
   const loaded = Boolean(production && cues && run)
@@ -261,6 +264,19 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
     }
   })
 
+  // Eos says how far the active cue has got: restart its bar from there.
+  const applyProgress = contextSafe((message) => {
+    if (!live || playingBack || message.cue !== run?.state.active_cue) return
+    const index = cueList.findIndex((c) => c.id === message.cue)
+    const bar = cardRefs.current[index]?.querySelector('.cue-fade')
+    if (!bar) return
+    const sample = { ...message, at: performance.now() / 1000 }
+    const { from, duration } = progressFade(sample, lastProgress.current, fadeSeconds(cueList[index]))
+    lastProgress.current = sample
+    gsap.killTweensOf(bar)
+    gsap.fromTo(bar, { scaleX: from }, { scaleX: 1, duration, ease: 'none' })
+  })
+
   // GO, BACK, GOTO, RESET, HOLD and RESUME all append one event and return
   // the new state. `arg` is the cue for GOTO and the reason for HOLD.
   // Resolves to whether the action went through.
@@ -379,6 +395,9 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
       switch (message.type) {
         case 'run.event':
           if (message.run === current) applyEvent(message.event, message.state)
+          break
+        case 'cue.progress':
+          if (message.run === current) applyProgress(message)
           break
         case 'runs':
           setRuns(await api.runs(productionId))

@@ -41,7 +41,7 @@ HEARD_AGAIN_AFTER = 10
 RECENT = 50
 # Fade progress, sent many times a second while a cue runs: kept in the recent
 # list but not written to the server log.
-PROGRESS = re.compile(r"^/eos/out/active/cue(/\d+/[0-9.]+)?$", re.I)
+PROGRESS = re.compile(r"^/eos/out/active/cue(/text|/\d+/[0-9.]+)?$", re.I)
 
 
 def plain(arg):

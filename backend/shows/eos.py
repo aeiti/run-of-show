@@ -23,6 +23,13 @@ from .serializers import CueEventSerializer, RunStateSerializer
 
 CUE_EVENT = re.compile(r"^/eos/out/event/cue/(?P<list>\d+)/(?P<number>[0-9.]+)/(?P<action>fire|stop|resume)$", re.I)
 
+# While a cue runs Eos sends its progress, both as text, "1/195 SUNRISE 5.0 50%"
+# (list/cue, label, time left, percent done), and as a 0..1 float.
+PROGRESS_TEXT = "/eos/out/active/cue/text"
+ACTIVE_CUE = re.compile(r"^/eos/out/active/cue/(?P<list>\d+)/(?P<number>[0-9.]+)$", re.I)
+# Read from the right: labels can contain spaces, or be empty.
+CUE_TEXT = re.compile(r"^(?P<list>\d+)/(?P<number>[0-9.]+)(?: .*?)? (?P<time>[0-9:.]+) (?P<percent>\d+(?:\.\d+)?)%$")
+
 # A repeat of the same cue within this many seconds is the same fire arriving twice
 # (both UDP and TCP set up, or Eos sending its standard and custom cue events).
 REPEAT_WINDOW = 1.0
@@ -136,6 +143,40 @@ def cue_fire(address):
         return None
 
 
+def _seconds(text):
+    """"5.0" or "1:30.5" as seconds, or None."""
+    try:
+        total = 0.0
+        for part in text.split(":"):
+            total = total * 60 + float(part)
+        return total
+    except ValueError:
+        return None
+
+
+def cue_progress(address, args):
+    """``(cue list, cue number, fraction done, seconds left or None)`` for Eos's cue progress, otherwise None.
+
+    The bare ``/eos/out/active/cue <float>`` doesn't say which cue, so it's ignored.
+    """
+    first = args[0] if args else None
+    try:
+        if address.lower() == PROGRESS_TEXT and isinstance(first, str):
+            match = CUE_TEXT.match(first.strip())
+            if not match:
+                return None
+            fraction = min(float(match["percent"]) / 100, 1.0)
+            # At 100% Eos shows the cue's whole time instead of the time left.
+            remaining = _seconds(match["time"]) if fraction < 1 else None
+            return int(match["list"]), Decimal(match["number"]), fraction, remaining
+        match = ACTIVE_CUE.match(address)
+        if match and isinstance(first, (int, float)) and not isinstance(first, bool):
+            return int(match["list"]), Decimal(match["number"]), min(max(float(first), 0.0), 1.0), None
+    except InvalidOperation:
+        pass
+    return None
+
+
 class Skip(Exception):
     """A fire that won't be recorded, and why."""
 
@@ -242,6 +283,7 @@ class Relay:
         self.cue_list = cue_list
         self.log = log
         self.repeats = Repeats(clock)
+        self.last_progress = None  # (cue number, percent) last sent to boards
 
     def handle(self, data):
         """Record any cue fires in ``data``, and log its other show control events. False if it wasn't OSC."""
@@ -250,6 +292,12 @@ class Relay:
         except OSCError:
             return False
         for address, args in messages:
+            # Progress repeats its address on every update, so it skips the repeat check.
+            progress = cue_progress(address, args)
+            if progress is not None:
+                if progress[0] == self.cue_list:
+                    self.progress(*progress[1:])
+                continue
             text = describe(address, args)
             if text is None or self.repeats.seen(address):
                 continue
@@ -260,7 +308,27 @@ class Relay:
                 log_console_event(self.production_id, ConsoleEvent.Kind.SHOW_CONTROL, text, address)
         return True
 
+    def progress(self, number, fraction, remaining):
+        """Tell boards how far the cue has got. Nothing is recorded."""
+        # Eos sends each update as text and as a float, and often twice over: send one.
+        sample = (number, round(fraction * 100))
+        if sample == self.last_progress:
+            return
+        self.last_progress = sample
+        try:
+            run = open_run(self.production_id)
+        except Skip:
+            return
+        cue = Cue.objects.filter(production=self.production_id, number=number).first()
+        if cue is None:
+            return
+        live.broadcast(
+            self.production_id,
+            {"type": "cue.progress", "run": run.id, "cue": cue.id, "progress": fraction, "remaining": remaining},
+        )
+
     def record(self, number, address=""):
+        self.last_progress = None  # a cue fired again starts its progress over
         name = f"Q{number.normalize():f}"
         try:
             run, action, cue = plan(self.production_id, number)

@@ -43,6 +43,23 @@ export function extraTotal(cue) {
 /** How long the fade bar runs after an action makes this cue active. */
 export const fadeFor = (action, cue) => (action === 'back' ? BACK_FADE : (fadeSeconds(cue) ?? 0))
 
+/**
+ * Where a cue's fade bar should be now, and how long it has left to fill, from Eos's
+ * progress `{ cue, progress, remaining, at }` (`at` in seconds, on any clock).
+ * The time left is Eos's when it says, otherwise the pace since the previous sample
+ * of this cue, otherwise what's left of the cue's own time.
+ */
+export function progressFade(sample, previous, cueFadeSeconds) {
+  const from = Math.min(Math.max(sample.progress, 0), 1)
+  if (from >= 1) return { from: 1, duration: 0 }
+  if (sample.remaining != null) return { from, duration: sample.remaining }
+  if (previous?.cue === sample.cue && previous.progress < from && sample.at > previous.at) {
+    const perSecond = (from - previous.progress) / (sample.at - previous.at)
+    return { from, duration: (1 - from) / perSecond }
+  }
+  return { from, duration: (cueFadeSeconds ?? 0) * (1 - from) }
+}
+
 function parseSeconds(text) {
   const parts = text.split(':')
   if (parts.length > 3 || parts.some((p) => !/^\d+(\.\d+)?$/.test(p))) return null
