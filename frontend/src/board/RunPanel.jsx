@@ -110,31 +110,30 @@ export default function RunPanel({
 
       {creating && (
         <form className="new-run" onSubmit={create}>
-          <div className="row">
-            <input
-              required
-              autoFocus
-              aria-label="New run label"
-              placeholder="Preview 2"
-              value={draft.label}
-              onChange={(e) => setDraft({ ...draft, label: e.target.value })}
-            />
-            <select aria-label="Kind" value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value })}>
-              {KINDS.map((k) => (
-                <option key={k}>{k}</option>
-              ))}
-            </select>
-          </div>
-          <div className="row">
+          {/* One field per row: the controls column is narrow, and the label, the kind
+              ("performance") and the date and time each need its width to show in full. */}
+          <input
+            required
+            autoFocus
+            aria-label="New run label"
+            placeholder="Preview 2"
+            value={draft.label}
+            onChange={(e) => setDraft({ ...draft, label: e.target.value })}
+          />
+          <select aria-label="Kind" value={draft.kind} onChange={(e) => setDraft({ ...draft, kind: e.target.value })}>
+            {KINDS.map((k) => (
+              <option key={k}>{k}</option>
+            ))}
+          </select>
+          <label>
+            Scheduled start (optional)
             <input
               type="datetime-local"
-              aria-label="Scheduled start (optional)"
-              title="Scheduled start (optional)"
               value={draft.scheduled_start}
               onChange={(e) => setDraft({ ...draft, scheduled_start: e.target.value })}
             />
-            <button type="submit">Start</button>
-          </div>
+          </label>
+          <button type="submit">Start</button>
         </form>
       )}
 
