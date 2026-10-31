@@ -406,3 +406,33 @@ select { font: inherit; color: inherit; background: #181b21; border: 1px solid v
 .unavailable { max-width: 560px; margin: 3rem auto; }
 .unavailable h2 { margin-top: 0; }
 .unavailable p { line-height: 1.5; }
+
+/* The board and the productions page fit the window (except on phones, where the
+   page scrolls as usual): the cue list, editor, script, controls and lists
+   scroll inside their own panels instead of the page. */
+@media (min-width: 761px) {
+  .shell:has(> .board), .shell:has(> .productions) { height: 100vh; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+  .shell:has(> .board) > .topbar, .shell:has(> .productions) > .topbar { flex: none; margin-bottom: 1rem; }
+
+  .board { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .board-head, .track { flex: none; }
+  .board-head { margin-bottom: 0.75rem; }
+  .board-body { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
+  .board-body > * { min-height: 0; }
+  .cue-list { max-height: none; align-content: start; }
+  .edit-pane { overflow-y: auto; }
+  .editor-rows { max-height: none; }
+  .script-viewer { height: auto; }
+  .controls { position: static; overflow-y: auto; }
+  /* Script under the cue list: they share the height, and the controls span both. */
+  .board-body.with-script { grid-template-rows: minmax(0, 1fr) minmax(0, 1fr); }
+  .board-body.with-script .controls { grid-row: 1 / span 2; }
+
+  .productions { flex: 1; min-height: 0; grid-template-rows: minmax(0, 1fr); align-items: stretch; }
+  .productions > * { min-height: 0; overflow-y: auto; }
+  .productions > .side { align-content: start; }
+}
+@media (min-width: 1280px) {
+  .board-body.with-script { grid-template-rows: minmax(0, 1fr); }
+  .board-body.with-script .controls { grid-row: auto; }
+}
