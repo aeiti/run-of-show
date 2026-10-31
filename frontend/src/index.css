@@ -58,11 +58,17 @@ label { display: grid; gap: 0.3rem; font-size: 0.8rem; color: var(--muted); marg
 .productions { display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; align-items: start; }
 .production-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
 .production-list li { display: flex; gap: 0.4rem; align-items: center; }
-.production-open { flex: 1; min-width: 0; display: flex; justify-content: space-between; gap: 1rem; text-align: left; padding: 0.8rem 1rem; }
+/* Name above its details, so a long name or venue never runs into the other. */
+.production-open { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: 0.2rem; text-align: left; padding: 0.7rem 1rem; overflow-wrap: anywhere; }
+.production-open .muted { font-size: 0.8rem; }
 .productions .side { display: grid; gap: 1rem; }
 
-.board-head { display: flex; gap: 1rem; align-items: flex-start; margin-bottom: 1.25rem; }
-.production-header { flex: 1; min-width: 0; }
+.board-head { display: flex; flex-wrap: wrap; gap: 0.75rem 1rem; align-items: flex-start; margin-bottom: 1.25rem; }
+/* Takes the row with the tools only while it gets a readable width; otherwise the tools wrap below. */
+.production-header { flex: 1 1 320px; min-width: 0; }
+.board-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 0.5rem 1rem; margin-left: auto; }
+.production-header > .row-between { flex-wrap: wrap; row-gap: 0.4rem; }
+.production-header .production-title { overflow-wrap: anywhere; }
 .production-header.editing { padding: 1rem; }
 .production-notes { margin: 0.4rem 0 0; font-size: 0.8rem; color: var(--text); white-space: pre-wrap; }
 .row-between { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
@@ -191,7 +197,7 @@ select { font: inherit; color: inherit; background: #181b21; border: 1px solid v
   .controls { position: static; order: -1; }
   .cue-inner { grid-template-columns: 3.5rem 1fr auto 3.5rem; }
   .cue-page { display: none; }
-  .board-head { flex-wrap: wrap; justify-content: space-between; }
+  .board-head { justify-content: space-between; }
   .production-header { order: 3; flex-basis: 100%; }
   .editor-head { display: none; }
   /* Number, label, time; then follow, page, scene; then notes and delete. */
