@@ -36,3 +36,22 @@ export function parseAddresses(text) {
       return true
     })
 }
+
+/** Where the show was for a note: "Q12 Lightning · 1.2 Wreck", or just the scene. */
+export const noteWhere = (note) => [cueText(note.cue_number, note.cue_label), note.scene].filter(Boolean).join(' · ')
+
+/**
+ * The moment for a note added later, from a time of day ("21:05") typed for
+ * the run that started (or was due to start) at ``baseIso``. A time more than
+ * 12 hours before the start is taken to be after midnight. Returns an ISO
+ * string, or null for no time.
+ */
+export function noteMoment(time, baseIso) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(time.trim())
+  if (!match) return null
+  const base = new Date(baseIso)
+  const moment = new Date(base)
+  moment.setHours(Number(match[1]), Number(match[2]), 0, 0)
+  if (base - moment > 12 * 3600 * 1000) moment.setDate(moment.getDate() + 1)
+  return moment.toISOString()
+}

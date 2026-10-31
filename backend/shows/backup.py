@@ -89,6 +89,8 @@ def import_production(owner, data, **details):
             linked = (note.pop("cue", None) or {}).get("number")
             created_at = note.pop("created_at")
             updated_at = note.pop("updated_at", None) or created_at
+            if "at" not in note and not note.get("added_later"):
+                note["at"] = created_at
             row = CueNote.objects.create(run=run, cue_id=cue_ids.get(linked), **note)
             CueNote.objects.filter(pk=row.pk).update(created_at=created_at, updated_at=updated_at)
 
