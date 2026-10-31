@@ -44,7 +44,7 @@ def show(alice):
     )
     two = Cue.objects.create(production=production, number=Decimal("2"), label="Shift", down_time=Decimal("5"))
     gone = Cue.objects.create(production=production, number=Decimal("2.5"), label="Cut later")
-    run = Run.objects.create(production=production, label="Preview 1", kind=Run.Kind.PREVIEW, notes="Late start")
+    run = Run.objects.create(production=production, label="Preview 1", kind=Run.Kind.PREVIEW)
     events = [
         CueEvent.objects.create(run=run, action="go", cue=one, cue_number=one.number, cue_label=one.label),
         CueEvent.objects.create(run=run, action="go", cue=two, cue_number=two.number, cue_label=two.label, note="late"),
@@ -69,7 +69,7 @@ def history(production):
     cues = list(production.cues.values("number", "label", "page", "notes", "scene", "time", "down_time", "duration", "follow"))
     runs = [
         {
-            **Run.objects.filter(pk=run.pk).values("label", "kind", "created_at", "scheduled_start", "started_at", "ended_at", "notes").get(),
+            **Run.objects.filter(pk=run.pk).values("label", "kind", "created_at", "scheduled_start", "started_at", "ended_at").get(),
             "events": list(
                 run.events.values("action", "cue__number", "cue_number", "cue_label", "fired_at", "note")
             ),

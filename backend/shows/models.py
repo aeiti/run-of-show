@@ -18,6 +18,25 @@ def production_logo_path(instance, filename):
     return f"productions/{instance.pk}/logo-{uuid.uuid4().hex}{os.path.splitext(filename)[1]}"
 
 
+# The sections a performance report groups its notes under, in order, for a
+# production that hasn't set its own: absences and injuries, then a section
+# per department, as in Mexodus's reports.
+DEFAULT_NOTE_SECTIONS = (
+    "Absences/Lateness",
+    "Injury/Illness",
+    "Show",
+    "Scenic",
+    "Lighting",
+    "Sound",
+    "Costumes",
+    "Props",
+    "Venue",
+)
+
+# Where the old free-text run notes went (migration 0016), and notes from an older backup.
+SHOW_SECTION = "Show"
+
+
 class Production(models.Model):
     owner = models.ForeignKey(
         settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="productions"
@@ -31,6 +50,8 @@ class Production(models.Model):
     notes = models.TextField(blank=True)
     # An optional PNG, JPEG, GIF or WebP, set through /productions/{id}/logo/.
     logo = models.FileField(upload_to=production_logo_path, blank=True, max_length=500)
+    # The report's note sections, in order; null for DEFAULT_NOTE_SECTIONS.
+    note_sections = models.JSONField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -46,6 +67,10 @@ class Production(models.Model):
 
     def __str__(self):
         return self.name
+
+    @property
+    def sections(self):
+        return list(DEFAULT_NOTE_SECTIONS if self.note_sections is None else self.note_sections)
 
 
 @receiver(post_delete, sender=Production)
@@ -190,7 +215,10 @@ class Run(models.Model):
     # (not a hold) and ``ended_at`` by "End run"; operators can correct both.
     started_at = models.DateTimeField(null=True, blank=True)
     ended_at = models.DateTimeField(null=True, blank=True)
-    notes = models.TextField(blank=True)
+    # No longer used: migration 0016 moved each run's notes into a performance
+    # note. Kept, with a database default, so checkouts still on older code can
+    # read and write runs; drop it in a later migration.
+    notes = models.TextField(blank=True, db_default="")
 
     class Meta:
         # Newest record first. Not by scheduled start: runs booked ahead of
@@ -314,6 +342,10 @@ class CueNote(models.Model):
     one was chosen for it. The report works out the run clock, the scene and
     any hold from it. The follow-up is the explanation written after the
     show, kept apart from the text written live.
+
+    ``section`` is one of the production's note sections, or "" for a note
+    not sorted yet. ``show_cue`` prints the cue and scene with the note in the
+    distributed report, which otherwise leaves them out.
     """
 
     run = models.ForeignKey(Run, on_delete=models.CASCADE, related_name="cue_notes")
@@ -332,6 +364,8 @@ class CueNote(models.Model):
         settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True, related_name="+"
     )
     follow_up_at = models.DateTimeField(null=True, blank=True)
+    section = models.CharField(max_length=100, blank=True, default="", db_default="")
+    show_cue = models.BooleanField(default=False, db_default=False)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

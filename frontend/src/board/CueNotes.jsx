@@ -6,10 +6,14 @@ import { findByNumber } from './state'
  * The cue box follows the loaded or active cue until it is typed in, and may
  * be left empty: before the first GO, at the act break, or for a note about
  * no cue in particular. The server stamps the time.
+ *
+ * The section stays as picked for the next note. In the note box, Alt+1 to
+ * Alt+9 pick the production's first nine sections and Alt+0 none.
  */
-export function CueNoteForm({ cues, defaultNumber, disabled, onAdd, inputRef }) {
+export function CueNoteForm({ cues, sections = [], defaultNumber, disabled, onAdd, inputRef }) {
   const [typed, setTyped] = useState(null) // null: follow defaultNumber
   const [text, setText] = useState('')
+  const [section, setSection] = useState('')
   const number = typed ?? defaultNumber ?? ''
   const cue = findByNumber(cues, number)
   // An empty box is no cue; a number that isn't in the list can't be saved.
@@ -18,7 +22,7 @@ export function CueNoteForm({ cues, defaultNumber, disabled, onAdd, inputRef }) 
   async function submit(e) {
     e.preventDefault()
     if (!cueOk || !text.trim()) return
-    if (await onAdd(cue?.id ?? null, text.trim())) {
+    if (await onAdd(cue?.id ?? null, text.trim(), sections.includes(section) ? section : '')) {
       setText('')
       setTyped(null)
       inputRef.current?.blur()
@@ -42,7 +46,28 @@ export function CueNoteForm({ cues, defaultNumber, disabled, onAdd, inputRef }) 
         maxLength={2000}
         value={text}
         onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          // By key position: Alt with a digit types another character on a Mac.
+          const digit = e.altKey && /^Digit(\d)$/.exec(e.code)?.[1]
+          if (!digit) return
+          e.preventDefault()
+          setSection(digit === '0' ? '' : (sections[Number(digit) - 1] ?? section))
+        }}
       />
+      {sections.length > 0 && (
+        <select
+          className="note-section"
+          aria-label="Section"
+          title="Alt+1 to Alt+9 in the note box pick a section, Alt+0 none"
+          value={sections.includes(section) ? section : ''}
+          onChange={(e) => setSection(e.target.value)}
+        >
+          <option value="">No section</option>
+          {sections.map((name) => (
+            <option key={name}>{name}</option>
+          ))}
+        </select>
+      )}
       <button type="submit" className="ghost" disabled={disabled || !cueOk || !text.trim()} title="N to write a note">
         Note
       </button>
@@ -75,6 +100,7 @@ export function CueNoteItem({ note, canEdit, onEdit, onDelete }) {
       <time>{new Date(note.at ?? note.created_at).toLocaleTimeString()}</time>
       <b className="log-action">NOTE </b>
       {note.cue_number && `Q${note.cue_number} `}
+      {note.section && <span className="muted">[{note.section}] </span>}
       {draft === null ? (
         <>
           {note.text}

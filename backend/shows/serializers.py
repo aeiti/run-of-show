@@ -80,6 +80,25 @@ class PersonSerializer(serializers.Serializer):
         return display_name(user)
 
 
+class NoteSectionsField(serializers.ListField):
+    """A list of section names: trimmed, blanks dropped, no name twice (ignoring case)."""
+
+    def __init__(self, **kwargs):
+        super().__init__(child=serializers.CharField(max_length=100, allow_blank=True), max_length=30, **kwargs)
+
+    def to_internal_value(self, data):
+        names, seen = [], set()
+        for name in super().to_internal_value(data):
+            name = name.strip()
+            if not name:
+                continue
+            if name.lower() in seen:
+                raise serializers.ValidationError(f"{name!r} is listed twice.")
+            seen.add(name.lower())
+            names.append(name)
+        return names
+
+
 class ProductionSerializer(serializers.ModelSerializer):
     owner = PersonSerializer(read_only=True)
     # The requesting user's role, so the UI can show only what they may do.
@@ -87,18 +106,23 @@ class ProductionSerializer(serializers.ModelSerializer):
     # Null, or a token that changes whenever the logo does. The image itself
     # is private, so it is fetched from /productions/{id}/logo/.
     logo = serializers.SerializerMethodField()
+    # The report's note sections, in order. Reads as the defaults until set.
+    note_sections = NoteSectionsField(required=False)
 
     class Meta:
         model = Production
         fields = [
-            "id", "name", "company", "venue", "opening_date", "closing_date", "notes", "logo", "created_at", "owner",
-            "role",
+            "id", "name", "company", "venue", "opening_date", "closing_date", "notes", "logo", "note_sections",
+            "created_at", "owner", "role",
         ]
         read_only_fields = ["id", "created_at"]
 
     def validate(self, data):
         check_order(data, self.instance, "opening_date", "closing_date", "The closing date can't be before the opening date.")
         return data
+
+    def to_representation(self, production):
+        return {**super().to_representation(production), "note_sections": production.sections}
 
     def get_role(self, production):
         return role_for(production, self.context["request"].user)
@@ -246,7 +270,7 @@ class RunSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Run
-        fields = ["id", "production", "label", "kind", "created_at", "scheduled_start", "started_at", "ended_at", "notes"]
+        fields = ["id", "production", "label", "kind", "created_at", "scheduled_start", "started_at", "ended_at"]
         read_only_fields = ["id", "production", "created_at"]
 
     def validate_started_at(self, value):
@@ -298,7 +322,8 @@ class CueNoteSerializer(serializers.ModelSerializer):
     the follow-up change. A note written live is stamped ``at`` the moment it
     was made. One added later (``added_later``, from the report) may be given
     an ``at`` of its own, and changed. Writing the follow-up records who
-    wrote it and when.
+    wrote it and when. ``section`` is one of the production's note sections,
+    or "" for none yet.
     """
 
     cue_number = CueNumberField(read_only=True)
@@ -309,7 +334,7 @@ class CueNoteSerializer(serializers.ModelSerializer):
         model = CueNote
         fields = [
             "id", "run", "cue", "cue_number", "cue_label", "text", "author", "at", "added_later",
-            "follow_up", "follow_up_by", "follow_up_at", "created_at", "updated_at",
+            "follow_up", "follow_up_by", "follow_up_at", "section", "show_cue", "created_at", "updated_at",
         ]
         read_only_fields = ["id", "run", "cue_number", "cue_label", "follow_up_at", "created_at", "updated_at"]
         extra_kwargs = {"cue": {"required": False, "allow_null": True}}
@@ -327,6 +352,12 @@ class CueNoteSerializer(serializers.ModelSerializer):
         if cue is not None and cue.production_id != run.production_id:
             raise serializers.ValidationError("That cue is not in this production.")
         return cue
+
+    def validate_section(self, section):
+        run = self.context.get("run") or self.instance.run
+        if section and section not in run.production.sections:
+            raise serializers.ValidationError(f"{section!r} isn't one of this production's note sections.")
+        return section
 
     def validate(self, data):
         if self.instance is not None and data.get("added_later", self.instance.added_later) != self.instance.added_later:
@@ -424,6 +455,8 @@ class ReportEmailSerializer(serializers.Serializer):
         max_length=MAX_REPORT_RECIPIENTS,
         error_messages={"max_length": f"Send the report to at most {MAX_REPORT_RECIPIENTS} addresses at a time."},
     )
+    # Print each note's time, run clock and cue, as in the SM's working view.
+    stamps = serializers.BooleanField(default=False)
 
     def validate_to(self, addresses):
         # The same address typed twice gets one email.
@@ -446,9 +479,12 @@ BACKUP_VERSION = 2
 class BackupProductionSerializer(serializers.ModelSerializer):
     # Not a ProductionSerializer subclass: its owner and role belong to whoever
     # is asking, not to the production file.
+    # Null (or left out, in older files) for the default note sections.
+    note_sections = NoteSectionsField(required=False, allow_null=True)
+
     class Meta:
         model = Production
-        fields = ["name", "company", "venue", "opening_date", "closing_date", "notes"]
+        fields = ["name", "company", "venue", "opening_date", "closing_date", "notes", "note_sections"]
 
     def validate(self, data):
         check_order(data, None, "opening_date", "closing_date", "The closing date can't be before the opening date.")
@@ -492,7 +528,7 @@ class BackupCueNoteSerializer(serializers.ModelSerializer):
         model = CueNote
         fields = [
             "cue", "cue_number", "cue_label", "text", "at", "added_later", "follow_up", "follow_up_at",
-            "created_at", "updated_at",
+            "section", "show_cue", "created_at", "updated_at",
         ]
 
 
@@ -500,6 +536,8 @@ class BackupRunSerializer(serializers.ModelSerializer):
     created_at = serializers.DateTimeField()
     events = BackupEventSerializer(many=True, required=False)
     cue_notes = BackupCueNoteSerializer(many=True, required=False)
+    # Only in files from before migration 0016; the import makes it a note in the Show section.
+    notes = serializers.CharField(required=False, allow_blank=True, write_only=True)
 
     class Meta:
         model = Run

@@ -4,7 +4,17 @@ import { api } from '../api'
 import { can } from '../access'
 import { findByNumber } from '../board/state'
 import { formatDateRange } from '../dates'
-import { cueText, lateness, length, noteMoment, noteWhere, parseAddresses, sceneName } from './reportText'
+import {
+  bySection,
+  cueText,
+  lateness,
+  length,
+  noteMoment,
+  noteWhere,
+  parseAddresses,
+  sceneName,
+  timeline,
+} from './reportText'
 
 const when = (iso) =>
   iso
@@ -20,9 +30,13 @@ const when = (iso) =>
 const clockTime = (iso) =>
   new Date(iso).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 
-/** Send the report to a few addresses; operators and up. */
+/**
+ * Send the report to a few addresses; operators and up. It goes as the
+ * distributed report, with each note's stamps only if asked.
+ */
 function EmailForm({ runId }) {
   const [text, setText] = useState('')
+  const [stamps, setStamps] = useState(false)
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
@@ -35,7 +49,7 @@ function EmailForm({ runId }) {
     setError('')
     setResult(null)
     try {
-      setResult(await api.emailReport(runId, to))
+      setResult(await api.emailReport(runId, to, stamps))
       setText('')
     } catch (err) {
       setError(err.status === 429 ? 'Too many reports sent. Try again later.' : err.message)
@@ -52,6 +66,10 @@ function EmailForm({ runId }) {
         value={text}
         onChange={(e) => setText(e.target.value)}
       />
+      <label className="report-email-stamps">
+        <input type="checkbox" checked={stamps} onChange={(e) => setStamps(e.target.checked)} />
+        With note times and cues
+      </label>
       <button type="submit" disabled={busy || !parseAddresses(text).length}>
         {busy ? 'Sending…' : 'Email'}
       </button>
@@ -62,72 +80,30 @@ function EmailForm({ runId }) {
 }
 
 /**
- * The run's own notes: incidents and anything else for the report. Operators
- * edit them here; the printed page shows the text.
- */
-function RunNotes({ runId, notes, canEdit, onSaved }) {
-  const [draft, setDraft] = useState(notes)
-  const [state, setState] = useState('')
-
-  async function save(e) {
-    e.preventDefault()
-    setState('saving')
-    try {
-      const updated = await api.updateRun(runId, { notes: draft })
-      onSaved(updated.notes)
-      setState('saved')
-    } catch (err) {
-      setState(err.message)
-    }
-  }
-
-  if (!canEdit) return notes ? <p className="pre">{notes}</p> : <p className="muted">None.</p>
-  return (
-    <>
-      <form className="no-print report-notes-form" onSubmit={save}>
-        <textarea
-          rows={4}
-          aria-label="Notes and incidents"
-          placeholder="Incidents, late starts, anything else for the report"
-          value={draft}
-          onChange={(e) => {
-            setDraft(e.target.value)
-            setState('')
-          }}
-        />
-        <div className="row">
-          <button type="submit" className="small" disabled={draft === notes || state === 'saving'}>
-            Save notes
-          </button>
-          {state === 'saved' && <span className="ok">Saved.</span>}
-          {state && state !== 'saved' && state !== 'saving' && <span className="error">{state}</span>}
-        </div>
-      </form>
-      <p className="pre print-only">{notes || 'None.'}</p>
-    </>
-  )
-}
-
-/**
  * One performance note: when and where it happened, the text written live,
  * and the follow-up written afterwards. Operators write the follow-up; the
  * live text stays as it was written.
  */
-function PerformanceNote({ note, canEdit, onChanged }) {
+function PerformanceNote({ note, sections, canEdit, onChanged }) {
   const [draft, setDraft] = useState(null) // null: not writing the follow-up
   const [error, setError] = useState('')
   const where = noteWhere(note)
 
-  async function save(e) {
-    e.preventDefault()
+  async function change(data) {
     setError('')
     try {
-      await api.updateCueNote(note.id, { follow_up: draft.trim() })
-      setDraft(null)
+      await api.updateCueNote(note.id, data)
       onChanged()
+      return true
     } catch (err) {
       setError(err.message)
+      return false
     }
+  }
+
+  async function save(e) {
+    e.preventDefault()
+    if (await change({ follow_up: draft.trim() })) setDraft(null)
   }
 
   return (
@@ -145,6 +121,22 @@ function PerformanceNote({ note, canEdit, onChanged }) {
         {note.text}
         {note.author && <span className="muted"> ({note.author})</span>}
       </p>
+      {canEdit && (
+        <div className="row note-sorting no-print">
+          <select aria-label="Section" value={note.section} onChange={(e) => change({ section: e.target.value })}>
+            <option value="">No section</option>
+            {/* A section since taken off the production's list stays pickable for this note. */}
+            {[...sections, ...(note.section && !sections.includes(note.section) ? [note.section] : [])].map((name) => (
+              <option key={name}>{name}</option>
+            ))}
+          </select>
+          <label title="Print the cue and scene with this note in the distributed report">
+            <input type="checkbox" checked={note.show_cue} onChange={(e) => change({ show_cue: e.target.checked })} />
+            Show cue in report
+          </label>
+        </div>
+      )}
+      {!canEdit && note.section && <div className="note-stamp">{note.section}</div>}
       {draft === null ? (
         <>
           {note.follow_up && (
@@ -187,8 +179,9 @@ function PerformanceNote({ note, canEdit, onChanged }) {
 }
 
 /** A note not caught live, with a cue and a time of day if the SM knows them. */
-function AddLaterNote({ runId, cues, baseIso, onAdded }) {
+function AddLaterNote({ runId, cues, sections, baseIso, onAdded }) {
   const [text, setText] = useState('')
+  const [section, setSection] = useState('')
   const [number, setNumber] = useState('')
   const [time, setTime] = useState('')
   const [error, setError] = useState('')
@@ -205,6 +198,7 @@ function AddLaterNote({ runId, cues, baseIso, onAdded }) {
         cue: cue?.id ?? null,
         at: noteMoment(time, baseIso),
         added_later: true,
+        section,
       })
       setText('')
       setNumber('')
@@ -235,6 +229,12 @@ function AddLaterNote({ runId, cues, baseIso, onAdded }) {
           onChange={(e) => setNumber(e.target.value)}
         />
         <input type="time" aria-label="Time (optional)" value={time} onChange={(e) => setTime(e.target.value)} />
+        <select aria-label="Section" value={section} onChange={(e) => setSection(e.target.value)}>
+          <option value="">No section</option>
+          {sections.map((name) => (
+            <option key={name}>{name}</option>
+          ))}
+        </select>
         <button type="submit" className="small" disabled={!cueOk || !text.trim()}>
           Add note
         </button>
@@ -245,11 +245,79 @@ function AddLaterNote({ runId, cues, baseIso, onAdded }) {
   )
 }
 
+const VIEW_KEY = 'ros-report-view'
+function storedView() {
+  try {
+    return localStorage.getItem(VIEW_KEY) === 'distributed' ? 'distributed' : 'working'
+  } catch {
+    return 'working'
+  }
+}
+
+/**
+ * The SM's working view: every note with its time, run clock and cue,
+ * between the scene changes and holds, for writing the report up.
+ */
+function WorkingNotes({ report, canEdit, onChanged }) {
+  const items = timeline(report.scenes, report.holds.items, report.performance_notes)
+  if (!report.performance_notes.length) return <p className="muted">No performance notes.</p>
+  return (
+    <ol className="report-notes">
+      {items.map((item) =>
+        item.kind === 'note' ? (
+          <PerformanceNote
+            key={item.key}
+            note={item.note}
+            sections={report.sections}
+            canEdit={canEdit}
+            onChanged={onChanged}
+          />
+        ) : item.kind === 'scene' ? (
+          <li key={item.key} className="timeline-mark">
+            <time dateTime={item.at}>{clockTime(item.at)}</time> · {sceneName(item.scene)}
+          </li>
+        ) : (
+          <li key={item.key} className="timeline-mark">
+            <time dateTime={item.at}>{clockTime(item.at)}</time> · Hold {length(item.hold.seconds)}
+            {item.hold.reason && `: ${item.hold.reason}`}
+          </li>
+        ),
+      )}
+    </ol>
+  )
+}
+
+/**
+ * The report as it goes out: notes as prose under the production's sections,
+ * without stamps. A note's cue and scene show only where the SM asked.
+ */
+function DistributedNotes({ report }) {
+  return bySection(report.sections, report.performance_notes).map(([section, notes]) => (
+    <div key={section} className="report-section">
+      <h3>{section}</h3>
+      {notes.length === 0 ? (
+        <p className="muted">Nothing to report.</p>
+      ) : (
+        <ul>
+          {notes.map((n) => (
+            <li key={n.id}>
+              <span className="pre">{n.text}</span>
+              {n.show_cue && noteWhere(n) && <span className="muted"> ({noteWhere(n)})</span>}
+              {n.follow_up && <p className="note-follow-up pre">{n.follow_up}</p>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  ))
+}
+
 /** The show report for one run, laid out to print (or save as PDF) from the browser. */
 export default function Report({ productionId, runId }) {
   const [report, setReport] = useState(null)
   const [cues, setCues] = useState([])
   const [role, setRole] = useState(null)
+  const [view, setView] = useState(storedView)
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -301,6 +369,15 @@ export default function Report({ productionId, runId }) {
 
   const { production, run, timing, holds, scenes } = report
   const late = lateness(timing.late_seconds)
+  const canEdit = can(role, 'operate')
+  function chooseView(key) {
+    setView(key)
+    try {
+      localStorage.setItem(VIEW_KEY, key)
+    } catch {
+      // Remembering the view is a convenience; private windows may refuse.
+    }
+  }
   return (
     <main className="report">
       <div className="report-tools no-print">
@@ -310,7 +387,7 @@ export default function Report({ productionId, runId }) {
           Print / Save as PDF
         </button>
       </div>
-      {can(role, 'operate') && (
+      {canEdit && (
         <div className="no-print">
           <EmailForm runId={runId} />
         </div>
@@ -419,34 +496,38 @@ export default function Report({ productionId, runId }) {
         </section>
 
         <section>
-          <h2>Performance notes</h2>
-          {report.performance_notes.length === 0 ? (
-            <p className="muted">No performance notes.</p>
-          ) : (
-            <ol className="report-notes">
-              {report.performance_notes.map((n) => (
-                <PerformanceNote key={n.id} note={n} canEdit={can(role, 'operate')} onChanged={refresh} />
+          <div className="row-between">
+            <h2>Performance notes</h2>
+            <div className="report-views no-print" role="group" aria-label="Report view">
+              {[
+                ['working', 'Working view'],
+                ['distributed', 'Distributed'],
+              ].map(([key, label]) => (
+                <button
+                  key={key}
+                  className={`ghost small${view === key ? ' on' : ''}`}
+                  aria-pressed={view === key}
+                  onClick={() => chooseView(key)}
+                >
+                  {label}
+                </button>
               ))}
-            </ol>
+            </div>
+          </div>
+          {view === 'working' ? (
+            <WorkingNotes report={report} canEdit={canEdit} onChanged={refresh} />
+          ) : (
+            <DistributedNotes report={report} />
           )}
-          {can(role, 'operate') && (
+          {canEdit && (
             <AddLaterNote
               runId={runId}
               cues={cues}
+              sections={report.sections}
               baseIso={run.started_at ?? run.scheduled_start ?? report.as_of}
               onAdded={refresh}
             />
           )}
-        </section>
-
-        <section>
-          <h2>Notes and incidents</h2>
-          <RunNotes
-            runId={runId}
-            notes={report.notes}
-            canEdit={can(role, 'operate')}
-            onSaved={(notes) => setReport((r) => ({ ...r, notes }))}
-          />
         </section>
 
         <footer className="muted">Report made {when(report.as_of)}.</footer>
