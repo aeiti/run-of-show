@@ -23,7 +23,7 @@ from .serializers import CueEventSerializer, RunStateSerializer
 
 CUE_EVENT = re.compile(r"^/eos/out/event/cue/(?P<list>\d+)/(?P<number>[0-9.]+)/(?P<action>fire|stop|resume)$", re.I)
 
-# While a cue runs Eos sends its progress, both as text, "1/195 SUNRISE 5.0 50%"
+# While a cue fades Eos sends its progress (and nothing while it's stopped), both as text, "1/195 SUNRISE 5.0 50%"
 # (list/cue, label, time left, percent done), and as a 0..1 float.
 PROGRESS_TEXT = "/eos/out/active/cue/text"
 ACTIVE_CUE = re.compile(r"^/eos/out/active/cue/(?P<list>\d+)/(?P<number>[0-9.]+)$", re.I)
@@ -132,15 +132,21 @@ class SlipFramer:
         )
 
 
-def cue_fire(address):
-    """``(cue list, cue number)`` for a cue fire event, otherwise None."""
+def cue_event(address):
+    """``(cue list, cue number, action)`` for a cue fire, stop or resume event, otherwise None."""
     match = CUE_EVENT.match(address)
-    if not match or match["action"].lower() != "fire":
+    if not match:
         return None
     try:
-        return int(match["list"]), Decimal(match["number"])
+        return int(match["list"]), Decimal(match["number"]), match["action"].lower()
     except InvalidOperation:
         return None
+
+
+def cue_fire(address):
+    """``(cue list, cue number)`` for a cue fire event, otherwise None."""
+    event = cue_event(address)
+    return event[:2] if event is not None and event[2] == "fire" else None
 
 
 def _seconds(text):
@@ -298,6 +304,11 @@ class Relay:
                 if progress[0] == self.cue_list:
                     self.progress(*progress[1:])
                 continue
+            # A stop or resume also skips it: holding or carrying on a bar twice does no harm,
+            # but missing a quick stop after a resume leaves the bar running.
+            event = cue_event(address)
+            if event is not None and event[0] == self.cue_list and event[2] in ("stop", "resume"):
+                self.stop_or_resume(event[1], event[2])
             text = describe(address, args)
             if text is None or self.repeats.seen(address):
                 continue
@@ -326,6 +337,18 @@ class Relay:
             self.production_id,
             {"type": "cue.progress", "run": run.id, "cue": cue.id, "progress": fraction, "remaining": remaining},
         )
+
+    def stop_or_resume(self, number, action):
+        """Tell boards the console stopped or resumed the cue's fade. The log line is added as for other events."""
+        # Eos sends no progress while a cue is stopped; after a resume the first update is new.
+        self.last_progress = None
+        try:
+            run = open_run(self.production_id)
+        except Skip:
+            return
+        cue = Cue.objects.filter(production=self.production_id, number=number).first()
+        if cue is not None:
+            live.broadcast(self.production_id, {"type": f"cue.{action}", "run": run.id, "cue": cue.id})
 
     def record(self, number, address=""):
         self.last_progress = None  # a cue fired again starts its progress over

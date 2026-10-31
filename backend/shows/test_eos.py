@@ -254,6 +254,38 @@ def test_progress_reaches_boards_once_per_update_and_records_nothing(show, conso
 
 
 @pytest.mark.django_db
+def test_stop_and_resume_reach_boards_and_progress_starts_over(show, console, broadcasts):
+    console.send(fire("1"))
+    console.relay.handle(progress_text("1", 40, "3.0"))
+    broadcasts.clear()
+    # Eos stops sending progress while a cue is stopped, so boards must hear the stop itself.
+    console.send(fire("1", action="stop"), fire("1", action="resume"), fire("1", cue_list=2, action="stop"))
+    console.relay.handle(progress_text("1", 40, "3.0"))  # the first update after the resume
+    cue = show.cues["1"].id
+    # List 2's stop isn't the followed list's, so it's only logged.
+    assert [m for m in broadcasts if m["type"] != "console.log"] == [
+        {"type": "cue.stop", "run": show.run.id, "cue": cue},
+        {"type": "cue.resume", "run": show.run.id, "cue": cue},
+        {"type": "cue.progress", "run": show.run.id, "cue": cue, "progress": 0.4, "remaining": 3.0},
+    ]
+    assert logged(show.run) == [
+        ("show_control", "Eos stopped list 1 Q1"),
+        ("show_control", "Eos resumed list 1 Q1"),
+        ("show_control", "Eos stopped list 2 Q1"),
+    ]
+
+
+@pytest.mark.django_db
+def test_a_quick_stop_after_a_resume_still_reaches_boards(show, console, broadcasts):
+    console.send(fire("1"))
+    broadcasts.clear()
+    for action in ("stop", "resume", "stop"):
+        console.clock.now += 0.3
+        console.relay.handle(fire("1", action=action))
+    assert [m["type"] for m in broadcasts if m["type"] != "console.log"] == ["cue.stop", "cue.resume", "cue.stop"]
+
+
+@pytest.mark.django_db
 def test_progress_for_another_list_no_run_or_unknown_cue_is_dropped(show, console, broadcasts):
     console.relay.handle(progress_text("1", 50, "1.0", cue_list=2))
     console.relay.handle(progress_text("7.5", 50, "1.0"))
