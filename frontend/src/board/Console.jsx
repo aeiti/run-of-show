@@ -200,7 +200,7 @@ export default function ConsoleDialog({ productionId, info, onSaved, onClose }) 
                 <ol>
                   {recent.map((r, i) => (
                     <li key={recent.length - i} className={r.problem ? 'problem' : r.result ? 'result' : ''}>
-                      <time>{new Date(r.at).toLocaleTimeString()}</time>
+                      <time dateTime={r.at}>{formatLogTime(r.at)}</time>
                       {r.result ?? r.note ?? `${r.address} ${r.args.map((a) => JSON.stringify(a)).join(' ')}`}
                     </li>
                   ))}
