@@ -53,7 +53,10 @@ def run_state(run):
         active = cues.filter(number=number).first()
         following = cues.filter(number__gt=number).first()
     hold = current_hold(run)
+    # Read fresh: the first GO or GOTO sets it on a locked copy of the run.
+    started = Run.objects.filter(pk=run.pk).values_list("started_at", flat=True).first()
     return {
+        "started_at": started,
         "active_cue": active.id if active else None,
         "active_number": number,
         "next_cue": following.id if following else None,

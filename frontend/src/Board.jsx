@@ -233,15 +233,18 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
   const applyEvent = contextSafe((event, state) => {
     if (seenEvents.current.has(event.id)) return
     seenEvents.current.add(event.id)
-    // The first GO or GOTO starts the run; the server records the same time.
-    const starts = !run?.started_at && (event.action === 'go' || event.action === 'goto')
+    // The first GO or GOTO starts the run. The server's state says when; the
+    // event's own time stands in for a server that doesn't send it.
+    const startedAt =
+      state.started_at ?? (event.action === 'go' || event.action === 'goto' ? event.fired_at : null)
+    const starts = !run?.started_at && Boolean(startedAt)
     setRun((prev) => ({
       ...prev,
       events: [...prev.events, event],
       state,
-      ...(starts && { started_at: event.fired_at }),
+      ...(!prev.started_at && startedAt && { started_at: startedAt }),
     }))
-    if (starts) setRuns((prev) => prev.map((r) => (r.id === event.run ? { ...r, started_at: event.fired_at } : r)))
+    if (starts) setRuns((prev) => prev.map((r) => (r.id === event.run ? { ...r, started_at: startedAt } : r)))
     // A hold or resume leaves the cues (and the loaded cue) as they are.
     if (event.action === 'hold' || event.action === 'resume') return
     // Someone fired the cue this screen had loaded: nothing left to load.

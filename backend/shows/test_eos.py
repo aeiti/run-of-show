@@ -161,6 +161,9 @@ def test_recorded_fires_say_the_console_fired_them_and_skipped_ones_are_logged(s
     console.send(fire("1"), fire("7.5"))
     event = CueEvent.objects.get(run=show.run)
     assert (event.action, event.source) == ("go", "console")
+    # The run's start, for boards that only hear the live message.
+    show.run.refresh_from_db()
+    assert show.run.started_at == event.fired_at
     assert logged(show.run) == [("show_control", "Console fired Q7.5; not recorded. Q7.5 isn't in this production's cue list.")]
     detail = client_for(show.owner).get(f"/api/runs/{show.run.id}/").data
     assert detail["events"][0]["source"] == "console"
@@ -201,6 +204,18 @@ def test_the_same_fire_twice_in_a_second_counts_once(show, console):
     assert recorded(show.run) == [("go", "1")]
     console.send(fire("1"))  # seconds later it is a real refire
     assert recorded(show.run) == [("go", "1"), ("goto", "1")]
+
+
+@pytest.mark.django_db
+def test_a_copy_with_other_messages_between_still_counts_once(show, console):
+    # Seen on a real desk: each packet arrived twice, so the fire's copy came
+    # after another event, and was recorded as a GOTO of the same cue.
+    console.send(fire("1"))
+    for packet in (osc("/eos/out/event/macro/5"), fire("1"), osc("/eos/out/event/macro/5")):
+        console.clock.now += 0.1
+        console.relay.handle(packet)
+    assert recorded(show.run) == [("go", "1")]
+    assert logged(show.run) == [("show_control", "Eos ran macro 5")]
 
 
 @pytest.mark.django_db

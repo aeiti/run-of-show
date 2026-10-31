@@ -283,6 +283,7 @@ class HoldStateSerializer(serializers.Serializer):
 
 
 class RunStateSerializer(serializers.Serializer):
+    started_at = serializers.DateTimeField(allow_null=True)
     active_cue = serializers.IntegerField(allow_null=True)
     active_number = CueNumberField(allow_null=True)
     next_cue = serializers.IntegerField(allow_null=True)

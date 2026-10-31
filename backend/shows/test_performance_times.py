@@ -145,6 +145,10 @@ def test_the_first_go_records_the_start(show):
     assert show.run.started_at is not None
     assert iso(show.run.started_at) == fired.data["event"]["fired_at"]
     assert client.get(f"/api/runs/{show.run.id}/").data["started_at"] == fired.data["event"]["fired_at"]
+    # The action's state carries it too, so boards that only hear the live message
+    # (a GO from the console or another screen) show the start.
+    assert fired.data["state"]["started_at"] == fired.data["event"]["fired_at"]
+    assert act(client, show.run, "go").data["state"]["started_at"] == fired.data["event"]["fired_at"]
 
 
 @pytest.mark.django_db
