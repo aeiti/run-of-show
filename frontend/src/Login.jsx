@@ -3,9 +3,8 @@ import { Link } from 'react-router'
 import { ApiError, login } from './api'
 
 export default function Login({ onLogin }) {
-  // Prefilled with the seed_demo account so the demo opens in one click.
-  const [username, setUsername] = useState('demo')
-  const [password, setPassword] = useState('curtain-up')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
   const [error, setError] = useState('')
 
   async function submit(e) {
@@ -32,7 +31,7 @@ export default function Login({ onLogin }) {
       </h1>
       <label>
         Username
-        <input autoComplete="username" value={username} onChange={(e) => setUsername(e.target.value)} />
+        <input autoComplete="username" placeholder="demo" value={username} onChange={(e) => setUsername(e.target.value)} />
       </label>
       <label>
         Password
