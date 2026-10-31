@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
+import { formatLogTime } from '../dates'
 
 const LOCAL = ['localhost', '127.0.0.1', '[::1]']
 const FIELDS = ['enabled', 'transport', 'port', 'host', 'framing', 'cue_list']
