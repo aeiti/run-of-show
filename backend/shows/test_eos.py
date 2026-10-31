@@ -12,7 +12,7 @@ from rest_framework.authtoken.models import Token
 from config.asgi import application
 from shows import services
 from shows.console import Supervisor
-from shows.eos import LengthFramer, OSCError, Relay, SlipFramer, cue_fire, describe, parse_packet
+from shows.eos import LengthFramer, OSCError, Relay, SlipFramer, cue_fire, cue_progress, describe, parse_packet
 from shows.models import ConsoleEvent, CueEvent, EosConsole, Membership, Run
 from shows.tests import client_for
 
@@ -194,6 +194,73 @@ def test_describe_names_eos_events_and_ignores_the_rest():
     assert describe("/eos/out/event/something/new", [3]) == "Eos /eos/out/event/something/new 3"
     assert describe("/eos/out/active/cue", [0.5]) is None
     assert describe("/eos/out/user", [1]) is None
+
+
+def test_cue_progress_reads_eos_text_and_floats():
+    text = "/eos/out/active/cue/text"
+    assert cue_progress(text, ["1/195 SUNRISE 5.0 50%"]) == (1, Decimal("195"), 0.5, 5.0)
+    # Labels with spaces, and ones ending in a number.
+    assert cue_progress(text, ["1/12.5 Lightning take 3 0.4 91%"]) == (1, Decimal("12.5"), 0.91, 0.4)
+    assert cue_progress(text, ["1/7 2.5 0%"]) == (1, Decimal("7"), 0.0, 2.5)
+    assert cue_progress(text, ["2/7 Fog 1:30.5 10%"]) == (2, Decimal("7"), 0.1, 90.5)
+    # At 100% the time is the cue's whole time, not what's left.
+    assert cue_progress(text, ["1/195 SUNRISE 12.0 100%"]) == (1, Decimal("195"), 1.0, None)
+    assert cue_progress("/eos/out/active/cue/1/195", [0.25]) == (1, Decimal("195"), 0.25, None)
+    for address, args in [
+        ("/eos/out/active/cue", [0.91]),  # names no cue
+        (text, [""]),
+        (text, ["SUNRISE 50%"]),
+        (text, ["1/195 SUNRISE 5.0"]),
+        (text, [0.5]),
+        ("/eos/out/active/cue/1/195", ["half"]),
+        ("/eos/out/active/cue/1/1.2.3", [0.5]),
+        ("/eos/out/event/cue/1/195/fire", ["SUNRISE"]),
+    ]:
+        assert cue_progress(address, args) is None, (address, args)
+
+
+@pytest.fixture
+def broadcasts(monkeypatch):
+    sent = []
+    monkeypatch.setattr("shows.eos.live.broadcast", lambda production_id, message: sent.append(message))
+    return sent
+
+
+def progress_text(cue, percent, remaining, cue_list=1):
+    return osc("/eos/out/active/cue/text", f"{cue_list}/{cue} Cue {cue} {remaining} {percent}%")
+
+
+@pytest.mark.django_db
+def test_progress_reaches_boards_once_per_update_and_records_nothing(show, console, broadcasts):
+    console.send(fire("1"))
+    broadcasts.clear()
+    # Eos sends each update as text and as a float, and the console here sends every packet twice.
+    update = bundle(progress_text("1", 40, "3.0"), osc("/eos/out/active/cue/1/1", 0.4000000059604645))
+    console.relay.handle(update)
+    console.relay.handle(update)
+    console.relay.handle(progress_text("1", 100, "5.0"))
+    cue = show.cues["1"].id
+    assert broadcasts == [
+        {"type": "cue.progress", "run": show.run.id, "cue": cue, "progress": 0.4, "remaining": 3.0},
+        {"type": "cue.progress", "run": show.run.id, "cue": cue, "progress": 1.0, "remaining": None},
+    ]
+    assert recorded(show.run) == [("go", "1")]
+    assert logged(show.run) == []
+    # Firing the cue again starts its progress over, even at a percent already sent.
+    console.send(fire("1"))
+    broadcasts.clear()
+    console.relay.handle(progress_text("1", 100, "5.0"))
+    assert len(broadcasts) == 1
+
+
+@pytest.mark.django_db
+def test_progress_for_another_list_no_run_or_unknown_cue_is_dropped(show, console, broadcasts):
+    console.relay.handle(progress_text("1", 50, "1.0", cue_list=2))
+    console.relay.handle(progress_text("7.5", 50, "1.0"))
+    show.run.ended_at = show.run.created_at
+    show.run.save()
+    console.relay.handle(progress_text("2", 50, "1.0"))
+    assert broadcasts == []
 
 
 @pytest.mark.django_db

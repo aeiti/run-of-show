@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { extraTotal, fadeFor, fadeSeconds, formatSeconds, formatTime, parseTimeInput } from './cueTime'
+import { extraTotal, fadeFor, fadeSeconds, formatSeconds, formatTime, parseTimeInput, progressFade } from './cueTime'
 
 const cue = (time, down_time = null, duration = null) => ({ time, down_time, duration })
 
@@ -52,5 +52,32 @@ describe('parseTimeInput', () => {
 
   it('refuses anything else', () => {
     for (const bad of ['abc', '-1', '1:75', '5/', '5/3/1', '/3']) expect(() => parseTimeInput(bad)).toThrow(/5\/3/)
+  })
+})
+
+describe('progressFade', () => {
+  const sample = (progress, at, remaining = null, cue = 4) => ({ cue, progress, remaining, at })
+
+  it('uses the time left when Eos gives it', () => {
+    expect(progressFade(sample(0.5, 10, 5), null, 12)).toEqual({ from: 0.5, duration: 5 })
+  })
+
+  it('otherwise keeps the pace since the previous sample of the same cue', () => {
+    // 10% to 30% in 2 s is 10% a second: 70% left takes 7 s.
+    const { from, duration } = progressFade(sample(0.3, 12), sample(0.1, 10), 60)
+    expect(from).toBe(0.3)
+    expect(duration).toBeCloseTo(7)
+  })
+
+  it('falls back to what is left of the cue time', () => {
+    expect(progressFade(sample(0.25, 12), null, 8)).toEqual({ from: 0.25, duration: 6 })
+    // A previous sample of another cue, or no progress since, says nothing about the pace.
+    expect(progressFade(sample(0.25, 12), sample(0.1, 10, null, 3), 8)).toEqual({ from: 0.25, duration: 6 })
+    expect(progressFade(sample(0.25, 12), sample(0.25, 10), 8)).toEqual({ from: 0.25, duration: 6 })
+    expect(progressFade(sample(0.25, 12), null, null)).toEqual({ from: 0.25, duration: 0 })
+  })
+
+  it('is full and done at 100%', () => {
+    expect(progressFade(sample(1, 12, 3), sample(0.5, 10), 8)).toEqual({ from: 1, duration: 0 })
   })
 })
