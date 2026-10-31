@@ -11,6 +11,8 @@ sends the group one small message:
 * ``access``: membership changed. Each socket rechecks its user's access and
   closes if it's gone; boards refetch the production, since the role may differ.
 * ``production.deleted``: boards leave.
+* ``console.log``: a console or network line was added to a run's log;
+  boards showing that run refetch it.
 * ``console``: the Eos console listener's status changed (see ``console.py``),
   sent with the new status.
 

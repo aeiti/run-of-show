@@ -15,6 +15,7 @@ from . import uploads
 from .models import (
     FOLLOW_VALIDATOR,
     Cue,
+    ConsoleEvent,
     CueEvent,
     EosConsole,
     CueNote,
@@ -227,7 +228,14 @@ class CueEventSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = CueEvent
-        fields = ["id", "run", "action", "cue", "cue_number", "cue_label", "fired_at", "note"]
+        fields = ["id", "run", "action", "cue", "cue_number", "cue_label", "fired_at", "note", "source"]
+        read_only_fields = fields
+
+
+class ConsoleEventSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ConsoleEvent
+        fields = ["id", "kind", "text", "address", "at"]
         read_only_fields = fields
 
 
@@ -312,10 +320,11 @@ class CueNoteSerializer(serializers.ModelSerializer):
 class RunDetailSerializer(RunSerializer):
     events = CueEventSerializer(many=True, read_only=True)
     cue_notes = CueNoteSerializer(many=True, read_only=True)
+    console_events = ConsoleEventSerializer(many=True, read_only=True)
     state = serializers.SerializerMethodField()
 
     class Meta(RunSerializer.Meta):
-        fields = RunSerializer.Meta.fields + ["events", "cue_notes", "state"]
+        fields = RunSerializer.Meta.fields + ["events", "cue_notes", "console_events", "state"]
 
     def get_state(self, run):
         return RunStateSerializer(run_state(run)).data

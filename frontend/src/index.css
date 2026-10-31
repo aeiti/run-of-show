@@ -198,6 +198,9 @@ select { font: inherit; color: inherit; background: #181b21; border: 1px solid v
   .editor-row { grid-template-columns: 4rem 1fr 4.4rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--line); }
 }
 .log-action { color: var(--stby); font-weight: 700; }
+.log-console { color: var(--muted); font-style: italic; }
+.log-console.network { opacity: 0.8; }
+.log-source { color: var(--muted); font-size: 0.68rem; }
 
 /* Playback */
 .playback { margin-top: 0.2rem; }

@@ -226,8 +226,8 @@ def test_export_round_trips_and_replace_keeps_run_logs(client, production):
     assert (event.cue_id, event.cue_number, event.cue_label) == (None, Decimal("1"), "Preset, warm")
 
     log = client.get(f"/api/runs/{run.id}/export/").content.decode().splitlines()
-    assert log[0] == "fired_at,seconds_from_start,action,cue_number,cue_label,note"
-    assert log[1].endswith(',0.0,go,1,"Preset, warm",')
+    assert log[0] == "fired_at,seconds_from_start,action,cue_number,cue_label,note,source"
+    assert log[1].endswith(',0.0,go,1,"Preset, warm",,')
 
 
 @pytest.mark.django_db

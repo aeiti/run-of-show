@@ -326,7 +326,7 @@ class RunViewSet(LiveUpdates, mixins.RetrieveModelMixin, mixins.UpdateModelMixin
 
     def get_queryset(self):
         return Run.objects.filter(production__in=visible_productions(self.request.user)).prefetch_related(
-            "events", "cue_notes__author__profile"
+            "events", "cue_notes__author__profile", "console_events"
         )
 
     def get_serializer_class(self):

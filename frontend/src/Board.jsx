@@ -363,6 +363,7 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
           if (message.run === current) await refreshRun()
           break
         case 'notes':
+        case 'console.log':
           if (message.run === current) await refreshRun()
           break
         case 'files':
