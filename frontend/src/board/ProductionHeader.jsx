@@ -4,8 +4,9 @@ import { can, ROLES } from '../access'
 import ProductionLogo from '../ProductionLogo'
 import LogoField from './LogoField'
 import { formatDateRange } from '../dates'
+import { formatCallTemplate, parseCallTemplate } from '../report/reportText'
 
-const FIELDS = ['name', 'company', 'venue', 'opening_date', 'closing_date', 'notes']
+const FIELDS = ['name', 'company', 'venue', 'opening_date', 'closing_date', 'notes', 'contacts']
 
 // onScript is null when there is no script to show.
 export default function ProductionHeader({ production, onSaved, onDeleted, onPeople, onFiles, onScript, scriptShown }) {
@@ -19,7 +20,11 @@ export default function ProductionHeader({ production, onSaved, onDeleted, onPeo
   function start() {
     // The note sections are edited one per line.
     const sections = (production.note_sections ?? []).join('\n')
-    setDraft({ ...Object.fromEntries(FIELDS.map((f) => [f, production[f] ?? ''])), note_sections: sections })
+    setDraft({
+      ...Object.fromEntries(FIELDS.map((f) => [f, production[f] ?? ''])),
+      note_sections: sections,
+      call_template: formatCallTemplate(production.call_template ?? []),
+    })
     setConfirmName(null)
     setError('')
     setEditing(true)
@@ -30,7 +35,12 @@ export default function ProductionHeader({ production, onSaved, onDeleted, onPeo
     try {
       const dates = { opening_date: draft.opening_date || null, closing_date: draft.closing_date || null }
       const note_sections = draft.note_sections.split('\n')
-      onSaved(await api.updateProduction(production.id, { ...draft, ...dates, note_sections }))
+      const { calls, bad } = parseCallTemplate(draft.call_template)
+      if (bad.length) {
+        setError(`Start each call with the minutes before curtain: "${bad[0]}"`)
+        return
+      }
+      onSaved(await api.updateProduction(production.id, { ...draft, ...dates, note_sections, call_template: calls }))
       setEditing(false)
     } catch (err) {
       setError(err.message)
@@ -120,6 +130,14 @@ export default function ProductionHeader({ production, onSaved, onDeleted, onPeo
         <label className="span-all">
           Report note sections, one per line, in order
           <textarea rows={5} {...field('note_sections')} />
+        </label>
+        <label className="span-all">
+          Next call: minutes before curtain and what happens, one per line
+          <textarea rows={4} placeholder={'45 Wig prep starts\n30 Half hour – House open'} {...field('call_template')} />
+        </label>
+        <label className="span-all">
+          Stage management contacts, printed at the foot of each report
+          <textarea rows={3} placeholder="PSM: name, phone, email" {...field('contacts')} />
         </label>
         <LogoField production={production} onSaved={onSaved} />
       </div>

@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import { api } from '../api'
 import { can } from '../access'
 import { findByNumber } from '../board/state'
+import { groupFiles, formatSize } from '../board/files'
 import { formatDateRange, fromLocalInput, keepSeconds, toLocalInput } from '../dates'
 import {
   actClock,
@@ -36,11 +37,14 @@ const clockTime = (iso) =>
 
 /**
  * Send the report to a few addresses; operators and up. It goes as the
- * distributed report, with each note's stamps only if asked.
+ * distributed report, with each note's stamps only if asked, and any of the
+ * production's files attached (the latest version of each).
  */
-function EmailForm({ runId }) {
+function EmailForm({ runId, files }) {
   const [text, setText] = useState('')
   const [stamps, setStamps] = useState(false)
+  const [attached, setAttached] = useState([])
+  const latest = groupFiles(files).map((g) => g.versions[0])
   const [busy, setBusy] = useState(false)
   const [result, setResult] = useState(null)
   const [error, setError] = useState('')
@@ -53,7 +57,7 @@ function EmailForm({ runId }) {
     setError('')
     setResult(null)
     try {
-      setResult(await api.emailReport(runId, to, stamps))
+      setResult(await api.emailReport(runId, to, stamps, attached))
       setText('')
     } catch (err) {
       setError(err.status === 429 ? 'Too many reports sent. Try again later.' : err.message)
@@ -77,6 +81,23 @@ function EmailForm({ runId }) {
       <button type="submit" disabled={busy || !parseAddresses(text).length}>
         {busy ? 'Sending…' : 'Email'}
       </button>
+      {latest.length > 0 && (
+        <details className="report-attach">
+          <summary>Attach files{attached.length ? ` (${attached.length})` : ''}</summary>
+          {latest.map((f) => (
+            <label key={f.id}>
+              <input
+                type="checkbox"
+                checked={attached.includes(f.id)}
+                onChange={(e) =>
+                  setAttached((prev) => (e.target.checked ? [...prev, f.id] : prev.filter((id) => id !== f.id)))
+                }
+              />
+              {f.name} <span className="muted">({formatSize(f.size)})</span>
+            </label>
+          ))}
+        </details>
+      )}
       {result && <p className="ok">Sent to {result.to.join(', ')}.</p>}
       {error && <p className="error">{error}</p>}
     </form>
@@ -374,6 +395,128 @@ function ActTimes({ runId, block, canEdit, onChanged }) {
   )
 }
 
+/**
+ * Who and what this performance is: the number (counted, or set by hand),
+ * a label for a special performance, and the stage managers calling it.
+ * Operators edit them here.
+ */
+function HeaderEdit({ runId, run, header, stageManagers, onDone }) {
+  const [draft, setDraft] = useState({
+    performance_number: run.performance_number ?? '',
+    special_label: run.special_label,
+    stage_managers: run.stage_managers,
+  })
+  const [error, setError] = useState('')
+
+  async function save(e) {
+    e.preventDefault()
+    try {
+      await api.updateRun(runId, { ...draft, performance_number: draft.performance_number === '' ? null : Number(draft.performance_number) })
+      onDone(true)
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  const field = (key) => ({ value: draft[key], onChange: (e) => setDraft({ ...draft, [key]: e.target.value }) })
+  return (
+    <form className="report-note-form report-header-form no-print" onSubmit={save}>
+      {header.number !== null && (
+        <label>
+          Number
+          <input type="number" min={1} placeholder={`${header.number} (counted)`} {...field('performance_number')} />
+        </label>
+      )}
+      <label>
+        Special performance
+        <input maxLength={200} placeholder="Opening Night" {...field('special_label')} />
+      </label>
+      <label>
+        Stage managers
+        <input
+          maxLength={500}
+          placeholder={stageManagers.inherited ? `${stageManagers.names} (as last time)` : 'Names, comma separated'}
+          {...field('stage_managers')}
+        />
+      </label>
+      <div className="row">
+        <button type="submit" className="small">
+          Save
+        </button>
+        <button type="button" className="ghost small" onClick={() => onDone(false)}>
+          Cancel
+        </button>
+      </div>
+      {error && <p className="error">{error}</p>}
+    </form>
+  )
+}
+
+/**
+ * The next call, worked out from the next scheduled run and the production's
+ * call template unless the SM has written their own, which they can edit or
+ * put back to the worked-out one.
+ */
+function NextCall({ runId, call, canEdit, onChanged }) {
+  const [draft, setDraft] = useState(null) // null: not editing
+  const [error, setError] = useState('')
+
+  async function save(value) {
+    setError('')
+    try {
+      await api.updateRun(runId, { next_call: value })
+      setDraft(null)
+      onChanged()
+    } catch (err) {
+      setError(err.message)
+    }
+  }
+
+  return (
+    <section className={call.text ? '' : 'no-print'}>
+      <div className="row-between">
+        <h2>Next call</h2>
+        {canEdit && draft === null && (
+          <span className="row no-print">
+            {call.edited && call.generated && (
+              <button className="ghost small report-edit-toggle" onClick={() => save('')}>
+                Use the worked-out call
+              </button>
+            )}
+            <button className="ghost small report-edit-toggle" onClick={() => setDraft(call.text)}>
+              Edit
+            </button>
+          </span>
+        )}
+      </div>
+      {draft !== null ? (
+        <form
+          className="report-note-form no-print"
+          onSubmit={(e) => {
+            e.preventDefault()
+            save(draft.trim())
+          }}
+        >
+          <textarea rows={6} aria-label="Next call" value={draft} onChange={(e) => setDraft(e.target.value)} />
+          <div className="row">
+            <button type="submit" className="small">
+              Save
+            </button>
+            <button type="button" className="ghost small" onClick={() => setDraft(null)}>
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : call.text ? (
+        <p className="pre">{call.text}</p>
+      ) : (
+        <p className="muted">No run is scheduled after this one. Add one with a scheduled start, or write the call here.</p>
+      )}
+      {error && <p className="error no-print">{error}</p>}
+    </section>
+  )
+}
+
 const VIEW_KEY = 'ros-report-view'
 function storedView() {
   try {
@@ -445,6 +588,8 @@ function DistributedNotes({ report }) {
 export default function Report({ productionId, runId }) {
   const [report, setReport] = useState(null)
   const [cues, setCues] = useState([])
+  const [files, setFiles] = useState([])
+  const [editingHeader, setEditingHeader] = useState(false)
   const [role, setRole] = useState(null)
   const [view, setView] = useState(storedView)
   const [error, setError] = useState('')
@@ -458,6 +603,8 @@ export default function Report({ productionId, runId }) {
         setReport(r)
         setRole(p.role)
         setCues(c)
+        // Only to offer as attachments, so a failure here doesn't stop the report.
+        api.files(productionId).then((f) => !cancelled && setFiles(f), () => {})
       })
       .catch((e) => setError(e.message))
     return () => {
@@ -518,7 +665,7 @@ export default function Report({ productionId, runId }) {
       </div>
       {canEdit && (
         <div className="no-print">
-          <EmailForm runId={runId} />
+          <EmailForm runId={runId} files={files} />
         </div>
       )}
 
@@ -526,6 +673,27 @@ export default function Report({ productionId, runId }) {
         <header>
           <p className="report-kicker">Show report</p>
           <h1>{production.name}</h1>
+          <p className="report-headline">
+            <strong>{report.header.line}</strong>
+            {canEdit && !editingHeader && (
+              <button className="ghost small no-print report-edit-toggle" onClick={() => setEditingHeader(true)}>
+                Edit
+              </button>
+            )}
+          </p>
+          {report.header.special_label && <p className="report-special">{report.header.special_label}</p>}
+          {editingHeader && (
+            <HeaderEdit
+              runId={runId}
+              run={run}
+              header={report.header}
+              stageManagers={report.stage_managers}
+              onDone={(saved) => {
+                setEditingHeader(false)
+                if (saved) refresh()
+              }}
+            />
+          )}
           <p>
             {[production.company, production.venue, formatDateRange(production.opening_date, production.closing_date)]
               .filter(Boolean)
@@ -661,7 +829,13 @@ export default function Report({ productionId, runId }) {
           )}
         </section>
 
-        <footer className="muted">Report made {when(report.as_of)}.</footer>
+        <NextCall runId={runId} call={report.next_call} canEdit={canEdit} onChanged={refresh} />
+
+        <footer className="report-sign-off">
+          {report.stage_managers.names && <p>Stage managers: {report.stage_managers.names}</p>}
+          {report.contacts && <p className="pre muted">{report.contacts}</p>}
+          <p className="muted">Report made {when(report.as_of)}.</p>
+        </footer>
       </article>
     </main>
   )
