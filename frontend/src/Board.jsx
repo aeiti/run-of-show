@@ -327,6 +327,21 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
     }
   })
 
+  // ACT UP and ACT DOWN record the act's time and return the new state; no cue moves.
+  async function markAct(direction) {
+    if (!live || busy || playingBack || !run || ended || !canOperate) return
+    setBusy(true)
+    setError('')
+    try {
+      const { state } = await (direction === 'up' ? api.actUp : api.actDown)(run.id)
+      setRun((prev) => ({ ...prev, state }))
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   // Clicking a card loads it (clicking again unloads). It never fires.
   function toggleLoad(cueId) {
     if (playingBack || ended) return
@@ -676,6 +691,9 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
               <Transport
                 disabled={busy || playingBack || !run || ended || !canOperate}
                 hold={hold}
+                act={run?.state.act ?? null}
+                acts={run?.state.acts ?? 0}
+                onAct={markAct}
                 goLabel={goLabel}
                 canGo={Boolean(nextCue)}
                 canBack={canBack}

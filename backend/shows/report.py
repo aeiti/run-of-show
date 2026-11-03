@@ -16,6 +16,13 @@ stopped and restarted rehearsal shows each pass. Scenes are found from the
 cue number recorded on each event against the current cue list, so a cue
 deleted since the run still counts towards the scene it was in.
 
+Acts are the times block a performance report opens with: each act's time
+up, time down and length (holds included, with the time held shown apart),
+the intermission between acts, the total of the acts and the show total
+from the first act up to the last act down. An act still up lasts until the
+run ended, or until now. A run with no acts marked has no times block; its
+start, end and running time are in the summary.
+
 Performance notes are listed in the order they happened (``at``), each with
 where the show was: the run clock (playing time since the start, held time
 left out, as in the scene lengths), the scene, and the hold it was written
@@ -111,6 +118,35 @@ def scenes(events, scene_of, until, hold_spans):
     return passes
 
 
+def acts(run_acts, until, hold_spans):
+    """Each act's times and length, the intermission before it, and the totals."""
+    items, previous = [], None
+    for act in sorted(run_acts, key=lambda a: a.number):
+        end = act.down_at or until
+        items.append({
+            "id": act.id,
+            "number": act.number,
+            "up_at": act.up_at,
+            "down_at": act.down_at,
+            "seconds": _seconds(act.up_at, end),
+            "held_seconds": _overlap(act.up_at, end, hold_spans),
+            "intermission_before_seconds": (
+                _seconds(previous.down_at, act.up_at) if previous and previous.down_at else None
+            ),
+        })
+        previous = act
+    if not items:
+        return {"items": [], "total_seconds": None, "show_seconds": None}
+    last_end = items[-1]["down_at"] or until
+    return {
+        "items": items,
+        # Without intermissions.
+        "total_seconds": round(sum(a["seconds"] for a in items), 3),
+        # From the first act up to the last act down, intermissions included.
+        "show_seconds": _seconds(items[0]["up_at"], last_end),
+    }
+
+
 def _playing_seconds(start, moment, spans):
     """The run clock at ``moment``: time since the start, less the time held. None before the start."""
     if start is None or moment < start:
@@ -198,6 +234,7 @@ def build(run, now=None):
             "total_seconds": round(sum(h["seconds"] for h in found_holds), 3),
             "items": found_holds,
         },
+        "acts": acts(run.acts.all(), until, spans),
         "scenes": scenes(events, scene_of, until, spans),
         "performance_notes": performance_notes(
             run.cue_notes.select_related("author__profile", "follow_up_by__profile"),
@@ -260,6 +297,43 @@ def _summary_rows(report):
         ("Running time", running),
         ("Holds", f"{held['count']}, {clock(held['total_seconds'])} in all"),
     ]
+
+
+ROMAN = ["", "I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"]
+
+
+def act_name(number):
+    return f"Act {ROMAN[number] if number < len(ROMAN) else number}"
+
+
+def act_clock(value):
+    """A time of day as a report prints it: 12-hour, no seconds ("8:07")."""
+    return timezone.localtime(value).strftime("%I:%M").lstrip("0") if value else "–"
+
+
+def act_rows(report):
+    """(label, value) rows for the times block, as the sample reports lay it out."""
+    block, rows = report["acts"], []
+    for act in block["items"]:
+        name = act_name(act["number"])
+        if act["intermission_before_seconds"] is not None:
+            rows.append(("Intermission", clock(act["intermission_before_seconds"])))
+        length = clock(act["seconds"])
+        if act["down_at"] is None:
+            length += " so far"
+        if act["held_seconds"]:
+            length += f" (held {clock(act['held_seconds'])})"
+        rows += [
+            (f"{name} up", act_clock(act["up_at"])),
+            (f"{name} down", act_clock(act["down_at"])),
+            (f"{name} total", length),
+        ]
+    if block["items"]:
+        rows += [
+            ("Total (without intermission)", clock(block["total_seconds"])),
+            ("Show total", clock(block["show_seconds"])),
+        ]
+    return rows
 
 
 def _scene_name(scene):
@@ -343,6 +417,10 @@ def as_text(report, stamps=False):
     ]
     lines += [f"{label}: {value}" for label, value in _summary_rows(report)]
 
+    if report["acts"]["items"]:
+        lines += ["", "ACTS"]
+        lines += [f"  {label}: {value}" for label, value in act_rows(report)]
+
     if report["scenes"]:
         lines += ["", "SCENES"]
         for scene in report["scenes"]:
@@ -412,6 +490,10 @@ def as_html(report, stamps=False):
             format_html_join("", "<tr><th align='left'>{}</th><td>{}</td></tr>", _summary_rows(report)),
         ),
     ]
+    if report["acts"]["items"]:
+        parts.append(format_html("<h2>Acts</h2><table>{}</table>", format_html_join(
+            "", "<tr><th align='left'>{}</th><td>{}</td></tr>", act_rows(report)
+        )))
     if report["scenes"]:
         parts.append(format_html("<h2>Scenes</h2><table>{}</table>", format_html_join(
             "",

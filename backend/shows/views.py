@@ -14,8 +14,9 @@ from rest_framework.response import Response
 from . import backup, csv_io, live, report, services, uploads
 from .access import ProductionRole, visible_productions
 from .console import supervisor
-from .models import Cue, CueNote, EosConsole, Membership, Production, ProductionFile, Run
+from .models import Act, Cue, CueNote, EosConsole, Membership, Production, ProductionFile, Run
 from .serializers import (
+    ActSerializer,
     CueEventSerializer,
     CueNoteSerializer,
     CueSerializer,
@@ -54,7 +55,7 @@ class LiveUpdates:
         if isinstance(obj, Production):
             self.live_production_id = obj.pk
         else:
-            self.live_production_id = obj.run.production_id if isinstance(obj, CueNote) else obj.production_id
+            self.live_production_id = obj.run.production_id if isinstance(obj, (CueNote, Act)) else obj.production_id
         return obj
 
     def finalize_response(self, request, response, *args, **kwargs):
@@ -306,6 +307,9 @@ class RunViewSet(LiveUpdates, mixins.RetrieveModelMixin, mixins.UpdateModelMixin
         "hold": "operate",
         "resume": "operate",
         "cue_notes": "operate",
+        "act_up": "operate",
+        "act_down": "operate",
+        "acts": "operate",
         "end": "operate",
         "email_report": "operate",
     }
@@ -314,6 +318,9 @@ class RunViewSet(LiveUpdates, mixins.RetrieveModelMixin, mixins.UpdateModelMixin
         "partial_update": "runs",
         "end": "runs",
         "cue_notes": "notes",
+        "act_up": "runs",
+        "act_down": "runs",
+        "acts": "runs",
         **{name: "run.event" for name in ("go", "back", "goto", "reset", "hold", "resume")},
     }
 
@@ -326,7 +333,7 @@ class RunViewSet(LiveUpdates, mixins.RetrieveModelMixin, mixins.UpdateModelMixin
 
     def get_queryset(self):
         return Run.objects.filter(production__in=visible_productions(self.request.user)).prefetch_related(
-            "events", "cue_notes__author__profile", "cue_notes__follow_up_by__profile", "console_events"
+            "events", "cue_notes__author__profile", "cue_notes__follow_up_by__profile", "console_events", "acts"
         )
 
     def get_serializer_class(self):
@@ -385,6 +392,36 @@ class RunViewSet(LiveUpdates, mixins.RetrieveModelMixin, mixins.UpdateModelMixin
             # The resume added a note about the hold.
             live.broadcast(self.live_production_id, {"type": "notes", "run": int(pk)})
         return response
+
+    def _act_action(self, fn):
+        run = self.get_object()
+        try:
+            fn(run)
+        except services.RunActionError as e:
+            return Response({"detail": str(e)}, status=e.status)
+        return Response({"state": RunStateSerializer(services.run_state(run)).data})
+
+    @action(detail=True, methods=["post"], url_path="act-up")
+    def act_up(self, request, pk=None):
+        """Start the next act now. Returns the run's ``state``."""
+        return self._act_action(services.act_up)
+
+    @action(detail=True, methods=["post"], url_path="act-down")
+    def act_down(self, request, pk=None):
+        """End the act that's up now. Returns the run's ``state``."""
+        return self._act_action(services.act_down)
+
+    @action(detail=True, methods=["get", "post"])
+    def acts(self, request, pk=None):
+        """The run's acts. POST ``up_at`` (and ``down_at``) to add one by hand, after the last."""
+        run = self.get_object()
+        if request.method == "GET":
+            return Response(ActSerializer(run.acts.all(), many=True).data)
+        serializer = ActSerializer(data=request.data, context={"run": run})
+        serializer.is_valid(raise_exception=True)
+        number = (run.acts.order_by("-number").values_list("number", flat=True).first() or 0) + 1
+        serializer.save(run=run, number=number)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
 
     @action(detail=True, methods=["get", "post"], url_path="notes")
     def cue_notes(self, request, pk=None):
@@ -453,6 +490,28 @@ class CueNoteViewSet(LiveUpdates, mixins.UpdateModelMixin, mixins.DestroyModelMi
     def get_queryset(self):
         return CueNote.objects.filter(run__production__in=visible_productions(self.request.user)).select_related(
             "run__production", "author__profile", "follow_up_by__profile"
+        )
+
+
+class ActViewSet(LiveUpdates, mixins.UpdateModelMixin, mixins.DestroyModelMixin, viewsets.GenericViewSet):
+    """Correct an act's times, or delete it. Created by the board or through ``/runs/{id}/acts/``."""
+
+    serializer_class = ActSerializer
+    permission_classes = ROLE_PERMISSIONS
+    capabilities = {"update": "operate", "partial_update": "operate", "destroy": "operate"}
+    live_topics = {"update": "runs", "partial_update": "runs", "destroy": "runs"}
+
+    def live_message(self, topic, response):
+        return {"type": topic, "run": self.act_run_id}
+
+    def get_object(self):
+        act = super().get_object()
+        self.act_run_id = act.run_id
+        return act
+
+    def get_queryset(self):
+        return Act.objects.filter(run__production__in=visible_productions(self.request.user)).select_related(
+            "run__production"
         )
 
 

@@ -38,6 +38,16 @@ const COLUMNS = [
     put: (text) => ({ page: text === '' ? null : Number(text) }), // the API wants a number or null
   },
   { key: 'scene', label: 'Scene', ...plain('scene') },
+  // "up" starts the next act when the cue fires, "down" ends the act that's up.
+  {
+    key: 'act_mark',
+    label: 'Act',
+    className: 'narrow',
+    placeholder: '–',
+    title: 'up: this cue starts the next act; down: it ends the act that is up',
+    get: (cue) => cue.act_mark ?? '',
+    put: (text) => ({ act_mark: text.trim().toLowerCase() }),
+  },
   { key: 'notes', label: 'Notes', className: 'wide', ...plain('notes') },
 ]
 

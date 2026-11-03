@@ -10,15 +10,21 @@ the run is held. Ending a held run is allowed; the hold then lasts until the end
 A resume also adds a performance note about the hold ("Held 6:00 in 1.2 Wreck
 at Q212: lost two movers"), for the SM to sort and expand in the report.
 
+ACT UP starts the next act and ACT DOWN ends the one that's up. A GO or GOTO
+on a cue flagged with an act mark does the same at the moment it fires, if
+there's anything to do: an "up" cue while an act is already up, or a "down"
+cue with none up, changes nothing.
+
 The first GO or GOTO records when the run started (``Run.started_at``), unless
 an operator has already set it. A hold, a reset or a step back doesn't: none
 of them fires a cue, and a hold before the top of the show is a late start.
 """
 
 from django.db import transaction
+from django.db.models import Max
 from django.utils import timezone
 
-from .models import Cue, CueEvent, CueNote, Run, format_number
+from .models import Act, Cue, CueEvent, CueNote, Run, format_number
 from .report import clock, scene_lookup
 
 
@@ -58,13 +64,38 @@ def run_state(run):
     hold = current_hold(run)
     # Read fresh: the first GO or GOTO sets it on a locked copy of the run.
     started = Run.objects.filter(pk=run.pk).values_list("started_at", flat=True).first()
+    act = open_act(run)
     return {
         "started_at": started,
         "active_cue": active.id if active else None,
         "active_number": number,
         "next_cue": following.id if following else None,
         "hold": {"since": hold.fired_at, "reason": hold.note} if hold else None,
+        "act": {"number": act.number, "up_at": act.up_at} if act else None,
+        # Not run.acts: the view may have prefetched them before this action added one.
+        "acts": Act.objects.filter(run_id=run.pk).count(),
     }
+
+
+def open_act(run):
+    """The act that is up, or None."""
+    return Act.objects.filter(run_id=run.pk, down_at__isnull=True).order_by("-number").first()
+
+
+def _mark_act(run, mark, at):
+    """Start the next act ("up") or end the one that's up ("down") at ``at``.
+    Returns the act, or None if there was nothing to do."""
+    act = open_act(run)
+    if mark == Cue.ActMark.UP:
+        if act is not None:
+            return None
+        number = (Act.objects.filter(run_id=run.pk).aggregate(last=Max("number"))["last"] or 0) + 1
+        return Act.objects.create(run=run, number=number, up_at=at)
+    if act is None:
+        return None
+    act.down_at = at
+    act.save(update_fields=["down_at"])
+    return act
 
 
 def _record(run, action, cue, source=""):
@@ -79,6 +110,8 @@ def _record(run, action, cue, source=""):
     if action in STARTS and run.started_at is None:
         run.started_at = event.fired_at
         run.save(update_fields=["started_at"])
+    if action in STARTS and cue is not None and cue.act_mark:
+        _mark_act(run, cue.act_mark, event.fired_at)
     return event
 
 
@@ -191,8 +224,26 @@ def resume(run, author=None):
     return resumed
 
 
+@transaction.atomic
+def act_up(run):
+    run = _locked(run, held_ok=True)
+    if _mark_act(run, Cue.ActMark.UP, timezone.now()) is None:
+        raise RunActionError(f"Act {open_act(run).number} is already up. Bring it down first.", status=409)
+    return run
+
+
+@transaction.atomic
+def act_down(run):
+    run = _locked(run, held_ok=True)
+    if _mark_act(run, Cue.ActMark.DOWN, timezone.now()) is None:
+        raise RunActionError("No act is up.", status=409)
+    return run
+
+
 def end(run):
     if run.ended_at is None:
         run.ended_at = timezone.now()
         run.save(update_fields=["ended_at"])
+        # An act still up comes down with the run.
+        run.acts.filter(down_at__isnull=True).update(down_at=run.ended_at)
     return run

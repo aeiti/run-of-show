@@ -131,7 +131,7 @@ button.danger:not(.ghost) { background: #2a1214; }
 /* Edit mode */
 .cue-editor { min-width: 0; }
 .editor-head, .editor-row {
-  display: grid; grid-template-columns: 4rem minmax(6rem, 1.4fr) 5.4rem 3.2rem 2.8rem minmax(4rem, 0.8fr) minmax(5rem, 1.6fr) 4.4rem;
+  display: grid; grid-template-columns: 4rem minmax(6rem, 1.4fr) 5.4rem 3.2rem 2.8rem minmax(4rem, 0.8fr) 3.6rem minmax(5rem, 1.6fr) 4.4rem;
   gap: 0.35rem; align-items: center;
 }
 .editor-head { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.1em; padding: 0 0 0.3rem; }
@@ -164,6 +164,8 @@ button.danger:not(.ghost) { background: #2a1214; }
 .row input { flex: 1; min-width: 0; }
 .row .narrow { flex: 0 0 3.2rem; }
 .controls > .ghost, .wide { width: 100%; }
+.act-button { margin-top: 0.4rem; letter-spacing: 0.06em; }
+.act-button.up { border-color: var(--stby); color: var(--stby); font-variant-numeric: tabular-nums; }
 /* BACK, the GOTO box and RESET are the widest thing in the controls: tighter
    padding and a box that can shrink keep them inside the column with wider fonts. */
 .transport-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 0.3rem; margin-bottom: 0.4rem; }
@@ -210,7 +212,7 @@ select { font: inherit; color: inherit; background: #181b21; border: 1px solid v
   .board-head { justify-content: space-between; }
   .production-header { order: 3; flex-basis: 100%; }
   .editor-head { display: none; }
-  /* Number, label, time; then follow, page, scene; then notes and delete. */
+  /* Number, label, time; then follow, page, scene; then act, notes and delete. */
   .editor-row { grid-template-columns: 4rem 1fr 4.4rem; padding-bottom: 0.4rem; border-bottom: 1px solid var(--line); }
 }
 .log-action { color: var(--stby); font-weight: 700; }
@@ -372,6 +374,10 @@ select { font: inherit; color: inherit; background: #181b21; border: 1px solid v
 .report-section ul { margin: 0; padding-left: 1.1rem; }
 .report-section li { margin-bottom: 0.3rem; }
 .report-section .note-follow-up { margin: 0.15rem 0 0; }
+.act-edit { gap: 0.6rem; align-items: center; font-size: 0.85rem; }
+.act-edit label { display: inline-flex; align-items: center; gap: 0.3rem; color: #555b64; }
+.act-edit-name { min-width: 4.5rem; font-weight: 600; }
+.report-edit-toggle { color: #555b64; border-color: #d9d6cf; }
 .report-email-stamps { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; }
 .report-note-form textarea, .report-note-form input { box-sizing: border-box; font: inherit; color: inherit; background: #fff; border: 1px solid #d9d6cf; border-radius: 4px; padding: 0.4rem 0.5rem; }
 .report-note-form textarea { width: 100%; }

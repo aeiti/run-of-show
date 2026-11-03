@@ -155,6 +155,12 @@ export const api = {
   reset: (runId) => request(`/runs/${runId}/reset/`, { method: 'POST' }),
   hold: (runId, reason) => request(`/runs/${runId}/hold/`, { method: 'POST', body: { reason } }),
   resume: (runId) => request(`/runs/${runId}/resume/`, { method: 'POST' }),
+  // ACT UP and ACT DOWN return { state }. Acts can be added, corrected and removed afterwards.
+  actUp: (runId) => request(`/runs/${runId}/act-up/`, { method: 'POST' }),
+  actDown: (runId) => request(`/runs/${runId}/act-down/`, { method: 'POST' }),
+  addAct: (runId, data) => request(`/runs/${runId}/acts/`, { method: 'POST', body: data }),
+  updateAct: (actId, data) => request(`/acts/${actId}/`, { method: 'PATCH', body: data }),
+  deleteAct: (actId) => request(`/acts/${actId}/`, { method: 'DELETE' }),
   // Notes on cues within a run: data is { cue, text } to add, { text } to edit.
   addCueNote: (runId, data) => request(`/runs/${runId}/notes/`, { method: 'POST', body: data }),
   updateCueNote: (noteId, data) => request(`/cue-notes/${noteId}/`, { method: 'PATCH', body: data }),

@@ -179,6 +179,13 @@ class Cue(models.Model):
     duration = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
     follow = models.CharField(max_length=12, blank=True, validators=[FOLLOW_VALIDATOR])
 
+    class ActMark(models.TextChoices):
+        UP = "up", "Act up"
+        DOWN = "down", "Act down"
+
+    # A GO or GOTO on this cue starts the next act ("up") or ends the one that's up ("down").
+    act_mark = models.CharField(max_length=4, choices=ActMark.choices, blank=True, default="", db_default="")
+
     class Meta:
         ordering = ["number"]
         constraints = [
@@ -378,6 +385,38 @@ class CueNote(models.Model):
 
     def __str__(self):
         return f"{self.run.label}: Q{format_number(self.cue_number)} {self.text[:40]}"
+
+
+class Act(models.Model):
+    """One act of a run, from when it went up to when it came down.
+
+    Acts are numbered in order. They are marked by a GO on a cue flagged
+    "act up" or "act down", or by the board's Act up and Act down buttons,
+    and the SM can correct the times afterwards. The time between one act
+    coming down and the next going up is the intermission.
+    """
+
+    run = models.ForeignKey(Run, on_delete=models.CASCADE, related_name="acts")
+    number = models.PositiveIntegerField()
+    up_at = models.DateTimeField()
+    down_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["number"]
+        constraints = [
+            models.UniqueConstraint(fields=["run", "number"], name="unique_act_number"),
+            models.CheckConstraint(
+                condition=models.Q(down_at__isnull=True) | models.Q(down_at__gte=models.F("up_at")),
+                name="act_down_after_up",
+            ),
+        ]
+
+    @property
+    def production(self):
+        return self.run.production
+
+    def __str__(self):
+        return f"{self.run.label}: Act {self.number}"
 
 
 def production_file_path(instance, filename):
