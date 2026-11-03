@@ -56,24 +56,32 @@ export function noteMoment(time, baseIso) {
   return moment.toISOString()
 }
 
-/** Where unsorted notes go in the distributed report. */
-export const OTHER_NOTES = 'Other notes'
+/**
+ * Where a note with no section goes. Only a label, unless a production lists
+ * a section with this name: then those notes go there, in its place.
+ */
+export const GENERAL = 'General'
+
+/** The sections to offer besides General, which is the empty choice. */
+export const pickableSections = (sections) => sections.filter((name) => name !== GENERAL)
 
 /**
  * [section, notes] pairs, as the server groups them for email: every one of
  * the production's sections in order, even with no notes; then sections no
- * longer in its list that notes still name; then unsorted notes, if any.
+ * longer in its list that notes still name; then General, for the notes with
+ * no section, if there are any and the production doesn't list it.
  */
 export function bySection(sections, notes) {
   const groups = new Map(sections.map((name) => [name, []]))
-  const unsorted = []
+  const general = []
   for (const note of notes) {
-    if (!note.section) unsorted.push(note)
-    else if (groups.has(note.section)) groups.get(note.section).push(note)
-    else groups.set(note.section, [note])
+    const name = note.section || GENERAL
+    if (name === GENERAL && !groups.has(GENERAL)) general.push(note)
+    else if (groups.has(name)) groups.get(name).push(note)
+    else groups.set(name, [note])
   }
   const pairs = [...groups]
-  return unsorted.length ? [...pairs, [OTHER_NOTES, unsorted]] : pairs
+  return general.length ? [...pairs, [GENERAL, general]] : pairs
 }
 
 /**

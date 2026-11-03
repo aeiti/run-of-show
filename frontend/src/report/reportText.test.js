@@ -6,7 +6,7 @@ import {
   length,
   noteMoment,
   noteWhere,
-  OTHER_NOTES,
+  GENERAL,
   parseAddresses,
   sceneName,
   timeline,
@@ -96,9 +96,16 @@ describe('note sections', () => {
       ['Show', [1, 4]],
       ['Lighting', []],
       ['Props', [3]],
-      [OTHER_NOTES, [2]],
+      [GENERAL, [2]],
     ])
     expect(bySection(['Show'], [])).toEqual([['Show', []]])
+    // Listed by the production, General takes the notes with no section in its own place.
+    const listed = bySection(['General', 'Show'], notes).map(([name, ns]) => [name, ns.map((n) => n.id)])
+    expect(listed).toEqual([
+      ['General', [2]],
+      ['Show', [1, 4]],
+      ['Props', [3]],
+    ])
   })
 })
 

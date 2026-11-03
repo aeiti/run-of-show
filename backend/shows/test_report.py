@@ -214,7 +214,7 @@ def test_the_email_shows_each_notes_stamps_flags_and_follow_up(show):
 
     text = report.as_text(built, stamps=True)
     for expected in [
-        "OTHER NOTES",
+        "GENERAL",
         "  19:52:00 · 16:00  1.1 Lamp Room [in hold: Audience medical]",
         "    Patron unwell, row F",
         "    Follow-up: FOH followed up; patron fine. (bob)",
@@ -222,7 +222,7 @@ def test_the_email_shows_each_notes_stamps_flags_and_follow_up(show):
     ]:
         assert expected in text, expected
     html = report.as_html(built, stamps=True)
-    assert "<h2>Other notes</h2>" in html and "FOH followed up" in html and "bob" in html
+    assert "<h2>General</h2>" in html and "FOH followed up" in html and "bob" in html
     assert "<b>stuck</b>" not in html and "&lt;b&gt;stuck&lt;/b&gt;" in html
 
 
@@ -373,7 +373,7 @@ def test_the_email_carries_the_report_as_text_and_html(show):
         "  20:20:00  10:00, not resumed  Fly bar stuck (at Q20)",
         "SHOW\n  - Kid <script>alert(1)</script> in row F",
         "LIGHTING\n  Nothing to report.",
-        "OTHER NOTES\n  - Q2 early\n  - Q10 late on the thunder",
+        "GENERAL\n  - Q2 early\n  - Q10 late on the thunder",
     ]:
         assert expected in text, expected
     html, kind = message.alternatives[0]
@@ -447,7 +447,7 @@ def test_notes_are_grouped_under_the_productions_sections(show):
         # Still named by a note, though no longer in the list.
         ("Props", ["From when Props was a section"]),
         # The fixture's two notes aren't sorted into a section.
-        ("Other notes", ["Q2 early", "Q10 late on the thunder"]),
+        ("General", ["Q2 early", "Q10 late on the thunder"]),
     ]
 
 
@@ -473,3 +473,19 @@ def test_the_email_can_carry_the_stamps(show):
     plain, stamped = (m.body for m in mail.outbox)
     assert "  - Q10 late on the thunder\n" in plain and "20:45:00" not in plain
     assert "  20:45:00 · 56:00  Q10 Cue 10 · 1.1 Lamp Room\n    Q10 late on the thunder (alice)" in stamped
+
+
+@pytest.mark.django_db
+def test_a_production_can_place_general_among_its_sections(show):
+    Production.objects.filter(pk=show.production.pk).update(note_sections=["General", "Lighting"])
+    show.run.refresh_from_db()
+    note(show, "Q10 bumped", at(20, 1), cue="10", section="Lighting")
+    note(show, "Saved in General", at(19, 45), section="General")
+
+    built = report.build(show.run)
+    groups = [(name, [n["text"] for n in notes]) for name, notes in report.by_section(built)]
+    # Notes with no section join the listed General, in time order, and it isn't repeated at the end.
+    assert groups == [
+        ("General", ["Saved in General", "Q2 early", "Q10 late on the thunder"]),
+        ("Lighting", ["Q10 bumped"]),
+    ]

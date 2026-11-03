@@ -284,22 +284,26 @@ def _note_stamp(note):
     return stamp
 
 
-OTHER_NOTES = "Other notes"
+# Where a note with no section goes. Only a label, unless a production lists
+# a section with this name: then those notes go there, in its place.
+GENERAL = "General"
 
 
 def by_section(report):
     """(section, notes) pairs: every one of the production's sections in order,
     even with no notes; then sections no longer in its list that notes still
-    name; then the notes not sorted into one, if there are any."""
+    name; then General, for the notes with no section, if there are any and
+    the production doesn't list it."""
     groups = {name: [] for name in report["sections"]}
-    unsorted = []
+    general = []
     for note in report["performance_notes"]:
-        if note["section"]:
-            groups.setdefault(note["section"], []).append(note)
+        name = note["section"] or GENERAL
+        if name == GENERAL and GENERAL not in report["sections"]:
+            general.append(note)
         else:
-            unsorted.append(note)
+            groups.setdefault(name, []).append(note)
     pairs = list(groups.items())
-    return pairs + [(OTHER_NOTES, unsorted)] if unsorted else pairs
+    return pairs + [(GENERAL, general)] if general else pairs
 
 
 def _note_flags(note):
