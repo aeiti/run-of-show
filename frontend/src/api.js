@@ -40,9 +40,9 @@ async function request(path, { method = 'GET', body, raw = false, token = getTok
     try {
       data = JSON.parse(text)
     } catch {
-      // Not JSON (e.g. an HTML error page); keep the raw text in the message.
+      // Not JSON (e.g. Django's HTML error page); the message gets a short summary of it.
     }
-    throw new ApiError(res.status, data, data ? flatten(data) : `${method} ${path} → ${res.status} ${text}`)
+    throw new ApiError(res.status, data, data ? flatten(data) : `${method} ${path} → ${res.status} ${errorSummary(text)}`)
   }
   if (raw) return res
   return res.status === 204 ? null : res.json()
@@ -68,6 +68,32 @@ export class ApiError extends Error {
     this.status = status
     this.data = data
   }
+}
+
+const SUMMARY_LENGTH = 300
+const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', '#x27': "'", '#39': "'", nbsp: ' ' }
+
+/**
+ * A line or two from an error response that isn't JSON, for the board's
+ * error line. From an HTML page (Django's debug page, a proxy's 502 page) the
+ * title and, when there is one, the exception message; otherwise the text.
+ * Never the whole page.
+ */
+export function errorSummary(text) {
+  const plain = (html) =>
+    html
+      .replace(/<[^>]*>/g, ' ')
+      .replace(/&([a-z]+|#x?[0-9a-f]+);/gi, (entity, name) => ENTITIES[name.toLowerCase()] ?? entity)
+      .replace(/\s+/g, ' ')
+      .trim()
+  let summary = text
+  if (/<html|<!doctype/i.test(text)) {
+    const title = plain(/<title>([\s\S]*?)<\/title>/i.exec(text)?.[1] ?? '')
+    const exception = plain(/<pre class="exception_value">([\s\S]*?)<\/pre>/i.exec(text)?.[1] ?? '')
+    summary = [title, exception].filter(Boolean).join(': ') || 'Server error'
+  }
+  summary = summary.replace(/\s+/g, ' ').trim()
+  return summary.length > SUMMARY_LENGTH ? `${summary.slice(0, SUMMARY_LENGTH - 1)}…` : summary
 }
 
 // DRF errors look like {"detail": "..."} or {"number": ["Cue 12 already exists."]}.
