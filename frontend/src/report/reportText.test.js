@@ -6,6 +6,7 @@ import {
   actName,
   bySection,
   cueText,
+  daySections,
   lateness,
   length,
   noteMoment,
@@ -160,5 +161,21 @@ describe('call template', () => {
     ]
     expect(formatCallTemplate(calls)).toBe('90 Crew call\n30 Half hour')
     expect(parseCallTemplate(formatCallTemplate(calls)).calls).toEqual(calls)
+  })
+})
+
+describe('daySections', () => {
+  it("merges each show's sections, with old sections and General after the production's", () => {
+    const shows = [
+      { performance_notes: [{ id: 1, section: 'Show' }, { id: 2, section: '' }] },
+      { performance_notes: [{ id: 3, section: 'Props' }, { id: 4, section: 'Show' }] },
+    ]
+    const ids = daySections(['Show', 'Tech'], shows).map(([name, perShow]) => [name, perShow.map((ns) => ns.map((n) => n.id))])
+    expect(ids).toEqual([
+      ['Show', [[1], [4]]],
+      ['Tech', [[], []]],
+      ['Props', [[], [3]]],
+      [GENERAL, [[2], []]],
+    ])
   })
 })

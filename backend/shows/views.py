@@ -446,10 +446,18 @@ class RunViewSet(LiveUpdates, mixins.RetrieveModelMixin, mixins.UpdateModelMixin
         """The show report: times, holds, scene lengths and notes (see report.py)."""
         return Response(report.build(self.get_object()))
 
+    @action(detail=True, methods=["get"], url_path="report/day")
+    def day_report(self, request, pk=None):
+        """One report for every performance or preview on this run's day (``report.build_day``)."""
+        run = self.get_object()
+        return Response(report.build_day(report.same_day(run, run.production.runs.all())))
+
     @action(detail=True, methods=["post"], url_path="report/email", throttle_scope="report_email")
     def email_report(self, request, pk=None):
         """Email the report, as text and HTML, to ``to`` (a list of addresses). One email each.
-        ``files`` are ids of this production's files to attach, up to REPORT_ATTACHMENTS_MAX_SIZE in all."""
+        ``files`` are ids of this production's files to attach, up to REPORT_ATTACHMENTS_MAX_SIZE in all.
+        On a day with more than one show, ``scope`` "day" sends one report for them all and "show" this
+        run's alone; left out, the production's ``combined_reports`` setting decides."""
         run = self.get_object()
         body = ReportEmailSerializer(data=request.data)
         body.is_valid(raise_exception=True)
@@ -468,9 +476,15 @@ class RunViewSet(LiveUpdates, mixins.RetrieveModelMixin, mixins.UpdateModelMixin
             with f.file.open("rb") as stored:
                 attachments.append((f.name, stored.read(), f.content_type))
 
-        built = report.build(run)
         stamps = body.validated_data["stamps"]
-        subject, text, html = report.subject(built), report.as_text(built, stamps), report.as_html(built, stamps)
+        day = report.same_day(run, run.production.runs.all())
+        scope = body.validated_data.get("scope") or ("day" if run.production.combined_reports else "show")
+        if scope == "day" and len(day) > 1:
+            built = report.build_day(day)
+            subject, text, html = report.subject_day(built), report.as_text_day(built, stamps), report.as_html_day(built, stamps)
+        else:
+            built = report.build(run)
+            subject, text, html = report.subject(built), report.as_text(built, stamps), report.as_html(built, stamps)
         reply_to = [request.user.email] if request.user.email else None
         messages = []
         for address in to:

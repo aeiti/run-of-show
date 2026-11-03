@@ -24,6 +24,7 @@ export default function ProductionHeader({ production, onSaved, onDeleted, onPeo
       ...Object.fromEntries(FIELDS.map((f) => [f, production[f] ?? ''])),
       note_sections: sections,
       call_template: formatCallTemplate(production.call_template ?? []),
+      combined_reports: production.combined_reports ?? true,
     })
     setConfirmName(null)
     setError('')
@@ -138,6 +139,14 @@ export default function ProductionHeader({ production, onSaved, onDeleted, onPeo
         <label className="span-all">
           Stage management contacts, printed at the foot of each report
           <textarea rows={3} placeholder="PSM: name, phone, email" {...field('contacts')} />
+        </label>
+        <label className="span-all checkbox">
+          <input
+            type="checkbox"
+            checked={draft.combined_reports}
+            onChange={(e) => setDraft({ ...draft, combined_reports: e.target.checked })}
+          />
+          One report for a two-show day (otherwise one report per show)
         </label>
         <LogoField production={production} onSaved={onSaved} />
       </div>

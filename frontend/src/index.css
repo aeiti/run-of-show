@@ -73,6 +73,8 @@ label { display: grid; gap: 0.3rem; font-size: 0.8rem; color: var(--muted); marg
 .production-notes { margin: 0.4rem 0 0; font-size: 0.8rem; color: var(--text); white-space: pre-wrap; }
 .row-between { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
 .field-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0 0.75rem; }
+.field-grid label.checkbox { display: flex; flex-direction: row; align-items: center; gap: 0.45rem; margin: 0.3rem 0 0.6rem; }
+.field-grid label.checkbox input { width: auto; margin: 0; }
 .span-all { grid-column: 1 / -1; }
 textarea { width: 100%; resize: vertical; }
 .spacer { flex: 1; }
@@ -389,6 +391,13 @@ select { font: inherit; color: inherit; background: #181b21; border: 1px solid v
 .report-sign-off p { margin: 0.2rem 0; }
 .report-attach { flex-basis: 100%; font-size: 0.85rem; }
 .report-attach label { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.3rem; }
+.report-scope { display: flex; flex-wrap: wrap; gap: 0.3rem; margin-bottom: 0.75rem; }
+.report-scope .ghost.on { border-color: var(--stby); color: var(--stby); }
+.day-times tbody th { white-space: nowrap; }
+.day-show-notes { margin: 0.2rem 0 0.4rem; }
+.day-show-notes ul { margin: 0.1rem 0 0; }
+.day-show-notes .muted { margin: 0.1rem 0 0 1.1rem; }
+.day-show-name { margin: 0.2rem 0 0; font-style: italic; color: #555b64; }
 .report-email-stamps { display: inline-flex; align-items: center; gap: 0.3rem; font-size: 0.8rem; }
 .report-note-form textarea, .report-note-form input { box-sizing: border-box; font: inherit; color: inherit; background: #fff; border: 1px solid #d9d6cf; border-radius: 4px; padding: 0.4rem 0.5rem; }
 .report-note-form textarea { width: 100%; }

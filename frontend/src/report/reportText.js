@@ -132,3 +132,17 @@ export function parseCallTemplate(text) {
   }
   return { calls, bad }
 }
+
+/**
+ * [section, [notes per show]] pairs for a day's combined report, as the server
+ * groups them for email: each show's sections (``bySection``), merged in order.
+ */
+export function daySections(sections, shows) {
+  const perShow = shows.map((show) => new Map(bySection(sections, show.performance_notes)))
+  const names = [...sections]
+  for (const groups of perShow) {
+    for (const name of groups.keys()) if (!names.includes(name) && name !== GENERAL) names.push(name)
+  }
+  if (perShow.some((groups) => groups.has(GENERAL)) && !names.includes(GENERAL)) names.push(GENERAL)
+  return names.map((name) => [name, perShow.map((groups) => groups.get(name) ?? [])])
+}

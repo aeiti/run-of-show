@@ -9,6 +9,7 @@ import {
   actClock,
   actName,
   bySection,
+  daySections,
   GENERAL,
   pickableSections,
   cueText,
@@ -40,7 +41,7 @@ const clockTime = (iso) =>
  * distributed report, with each note's stamps only if asked, and any of the
  * production's files attached (the latest version of each).
  */
-function EmailForm({ runId, files }) {
+function EmailForm({ runId, files, scope }) {
   const [text, setText] = useState('')
   const [stamps, setStamps] = useState(false)
   const [attached, setAttached] = useState([])
@@ -57,7 +58,7 @@ function EmailForm({ runId, files }) {
     setError('')
     setResult(null)
     try {
-      setResult(await api.emailReport(runId, to, stamps, attached))
+      setResult(await api.emailReport(runId, to, stamps, attached, scope))
       setText('')
     } catch (err) {
       setError(err.status === 429 ? 'Too many reports sent. Try again later.' : err.message)
@@ -323,6 +324,25 @@ function ActEditRow({ act, onSave, onDelete }) {
  * between acts, and the totals. Operators correct the times or add acts.
  * A run with no acts leaves it out of the printed report.
  */
+/** [label, value] rows for an acts block, as the sample reports lay it out. */
+function actRows(block) {
+  const rows = []
+  for (const a of block.items) {
+    const name = actName(a.number)
+    if (a.intermission_before_seconds !== null) rows.push(['Intermission', length(a.intermission_before_seconds)])
+    const held = a.held_seconds ? ` (held ${length(a.held_seconds)})` : ''
+    rows.push(
+      [`${name} up`, actClock(a.up_at)],
+      [`${name} down`, actClock(a.down_at)],
+      [`${name} total`, `${length(a.seconds)}${a.down_at ? '' : ' so far'}${held}`],
+    )
+  }
+  if (block.items.length) {
+    rows.push(['Total (without intermission)', length(block.total_seconds)], ['Show total', length(block.show_seconds)])
+  }
+  return rows
+}
+
 function ActTimes({ runId, block, canEdit, onChanged }) {
   const [editing, setEditing] = useState(false)
   const [error, setError] = useState('')
@@ -339,20 +359,7 @@ function ActTimes({ runId, block, canEdit, onChanged }) {
     }
   }
 
-  const rows = []
-  for (const a of block.items) {
-    const name = actName(a.number)
-    if (a.intermission_before_seconds !== null) rows.push(['Intermission', length(a.intermission_before_seconds)])
-    const held = a.held_seconds ? ` (held ${length(a.held_seconds)})` : ''
-    rows.push(
-      [`${name} up`, actClock(a.up_at)],
-      [`${name} down`, actClock(a.down_at)],
-      [`${name} total`, `${length(a.seconds)}${a.down_at ? '' : ' so far'}${held}`],
-    )
-  }
-  if (block.items.length) {
-    rows.push(['Total (without intermission)', length(block.total_seconds)], ['Show total', length(block.show_seconds)])
-  }
+  const rows = actRows(block)
 
   return (
     <section className={block.items.length ? '' : 'no-print'}>
@@ -584,6 +591,152 @@ function DistributedNotes({ report }) {
   ))
 }
 
+const dayTime = (iso) => (iso ? new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : '–')
+
+/**
+ * One show's summary and act times, as [label, value] rows for the day's
+ * side-by-side table. Times of day only: the header gives the date.
+ */
+function showTimes(show) {
+  const { run, timing, holds } = show
+  const late = lateness(timing.late_seconds)
+  return [
+    ['Scheduled', dayTime(run.scheduled_start)],
+    ['Started', run.started_at ? `${dayTime(run.started_at)}${late ? ` (${late})` : ''}` : 'Not started'],
+    ['Ended', run.ended_at ? dayTime(run.ended_at) : 'Still running'],
+    ['Running time', length(timing.running_seconds)],
+    ['Holds', `${holds.count}, ${length(holds.total_seconds)} in all`],
+    ...actRows(show.acts),
+  ]
+}
+
+/**
+ * The combined report for a day's shows: one header, the shows' times side by
+ * side, each section's notes split by show, the last show's next call and one
+ * sign-off. Read-only: each show's own report is where its notes, acts and
+ * next call are edited.
+ */
+function DayReport({ runId, onLoaded }) {
+  const [day, setDay] = useState(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+    api.dayReport(runId).then(
+      (d) => {
+        if (cancelled) return
+        setDay(d)
+        onLoaded(d)
+      },
+      (e) => !cancelled && setError(e.message),
+    )
+    return () => {
+      cancelled = true
+    }
+    // onLoaded only names the page; the day is fetched once per run.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runId])
+
+  if (error) return <p className="error">{error}</p>
+  if (!day) return <p className="muted">Loading the day's report…</p>
+
+  const { production, shows } = day
+  const columns = shows.map((show) => new Map(showTimes(show)))
+  const labels = [...new Set(shows.flatMap((show) => showTimes(show).map(([label]) => label)))]
+  return (
+    <>
+      <header>
+        <p className="report-kicker">Show report</p>
+        <h1>{production.name}</h1>
+        <p className="report-headline">
+          <strong>
+            {day.title} · {day.date}
+          </strong>
+        </p>
+        {day.special_labels.map((label) => (
+          <p key={label} className="report-special">
+            {label}
+          </p>
+        ))}
+        <p>
+          {[production.company, production.venue, formatDateRange(production.opening_date, production.closing_date)]
+            .filter(Boolean)
+            .join(' · ')}
+        </p>
+        {day.in_progress && <p className="report-warning">Still running: times are up to {when(day.as_of)}.</p>}
+      </header>
+
+      <section>
+        <h2>Times</h2>
+        <table className="report-table day-times">
+          <thead>
+            <tr>
+              <th />
+              {shows.map((show) => (
+                <th key={show.run.id}>{show.header.title}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {labels.map((label) => (
+              <tr key={label}>
+                <th scope="row">{label}</th>
+                {columns.map((column, i) => (
+                  <td key={shows[i].run.id}>{column.get(label) ?? ''}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+
+      <section>
+        <h2>Performance notes</h2>
+        {daySections(day.sections, shows).map(([section, perShow]) => (
+          <div key={section} className="report-section">
+            <h3>{section}</h3>
+            {perShow.every((notes) => notes.length === 0) ? (
+              <p className="muted">Nothing to report.</p>
+            ) : (
+              shows.map((show, i) => (
+                <div key={show.run.id} className="day-show-notes">
+                  <p className="day-show-name">{show.header.title}:</p>
+                  {perShow[i].length === 0 ? (
+                    <p className="muted">None.</p>
+                  ) : (
+                    <ul>
+                      {perShow[i].map((n) => (
+                        <li key={n.id}>
+                          <span className="pre">{n.text}</span>
+                          {n.show_cue && noteWhere(n) && <span className="muted"> ({noteWhere(n)})</span>}
+                          {n.follow_up && <p className="note-follow-up pre">{n.follow_up}</p>}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              ))
+            )}
+          </div>
+        ))}
+      </section>
+
+      {day.next_call.text && (
+        <section>
+          <h2>Next call</h2>
+          <p className="pre">{day.next_call.text}</p>
+        </section>
+      )}
+
+      <footer className="report-sign-off">
+        {day.stage_managers && <p>Stage managers: {day.stage_managers}</p>}
+        {day.contacts && <p className="pre muted">{day.contacts}</p>}
+        <p className="muted">Report made {when(day.as_of)}.</p>
+      </footer>
+    </>
+  )
+}
+
 /** The show report for one run, laid out to print (or save as PDF) from the browser. */
 export default function Report({ productionId, runId }) {
   const [report, setReport] = useState(null)
@@ -592,6 +745,9 @@ export default function Report({ productionId, runId }) {
   const [editingHeader, setEditingHeader] = useState(false)
   const [role, setRole] = useState(null)
   const [view, setView] = useState(storedView)
+  // "day" or "show" once picked; until then the production's setting decides.
+  const [scopeChoice, setScopeChoice] = useState(null)
+  const [dayTitle, setDayTitle] = useState('')
   const [error, setError] = useState('')
 
   useEffect(() => {
@@ -623,11 +779,11 @@ export default function Report({ productionId, runId }) {
   useEffect(() => {
     if (!report) return
     const before = document.title
-    document.title = `Show report – ${report.production.name} – ${report.run.label}`
+    document.title = `Show report – ${report.production.name} – ${dayTitle || report.run.label}`
     return () => {
       document.title = before
     }
-  }, [report])
+  }, [report, dayTitle])
 
   const back = (
     <Link className="account-link" to={`/productions/${productionId}/runs/${runId}`}>
@@ -646,6 +802,8 @@ export default function Report({ productionId, runId }) {
   const { production, run, timing, holds, scenes } = report
   const late = lateness(timing.late_seconds)
   const canEdit = can(role, 'operate')
+  // A run that shares its day with other shows can show the day's combined report.
+  const scope = report.day ? (scopeChoice ?? (report.day.combined ? 'day' : 'show')) : 'show'
   function chooseView(key) {
     setView(key)
     try {
@@ -663,180 +821,206 @@ export default function Report({ productionId, runId }) {
           Print / Save as PDF
         </button>
       </div>
+      {report.day && (
+        <div className="report-scope no-print" role="group" aria-label="Report for">
+          {[
+            ['day', `Whole day (${report.day.shows.map((s) => s.title).join(', ')})`],
+            ['show', `This show only`],
+          ].map(([key, label]) => (
+            <button
+              key={key}
+              className={`ghost small${scope === key ? ' on' : ''}`}
+              aria-pressed={scope === key}
+              onClick={() => {
+                setScopeChoice(key)
+                if (key === 'show') setDayTitle('')
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       {canEdit && (
         <div className="no-print">
-          <EmailForm runId={runId} files={files} />
+          <EmailForm runId={runId} files={files} scope={report.day ? scope : undefined} />
         </div>
       )}
 
-      <article className="report-sheet">
-        <header>
-          <p className="report-kicker">Show report</p>
-          <h1>{production.name}</h1>
-          <p className="report-headline">
-            <strong>{report.header.line}</strong>
-            {canEdit && !editingHeader && (
-              <button className="ghost small no-print report-edit-toggle" onClick={() => setEditingHeader(true)}>
-                Edit
-              </button>
-            )}
-          </p>
-          {report.header.special_label && <p className="report-special">{report.header.special_label}</p>}
-          {editingHeader && (
-            <HeaderEdit
-              runId={runId}
-              run={run}
-              header={report.header}
-              stageManagers={report.stage_managers}
-              onDone={(saved) => {
-                setEditingHeader(false)
-                if (saved) refresh()
-              }}
-            />
-          )}
-          <p>
-            {[production.company, production.venue, formatDateRange(production.opening_date, production.closing_date)]
-              .filter(Boolean)
-              .join(' · ')}
-          </p>
-          <p>
-            <strong>{run.label}</strong> · {run.kind}
-          </p>
-          {report.in_progress && <p className="report-warning">Still running: times are up to {when(report.as_of)}.</p>}
-        </header>
-
-        <dl className="report-summary">
-          <dt>Scheduled</dt>
-          <dd>{when(run.scheduled_start)}</dd>
-          <dt>Started</dt>
-          <dd>
-            {run.started_at ? when(run.started_at) : 'Not started'}
-            {late && ` (${late})`}
-          </dd>
-          <dt>Ended</dt>
-          <dd>{run.ended_at ? when(run.ended_at) : 'Still running'}</dd>
-          <dt>Running time</dt>
-          <dd>
-            {length(timing.running_seconds)}
-            {timing.held_in_run_seconds > 0 && ` (${length(timing.held_in_run_seconds)} of it held)`}
-          </dd>
-          <dt>Holds</dt>
-          <dd>
-            {holds.count} {holds.count === 1 ? 'hold' : 'holds'}, {length(holds.total_seconds)} in all
-          </dd>
-          <dt>Cues fired</dt>
-          <dd>{timing.cues_fired}</dd>
-        </dl>
-
-        <ActTimes runId={runId} block={report.acts} canEdit={canEdit} onChanged={refresh} />
-
-        <section>
-          <h2>Scenes</h2>
-          {scenes.length === 0 ? (
-            <p className="muted">No cues fired.</p>
-          ) : (
-            <table className="report-table">
-              <thead>
-                <tr>
-                  <th>Scene</th>
-                  <th>From</th>
-                  <th>Up</th>
-                  <th className="num">Length</th>
-                  <th className="num">Held</th>
-                </tr>
-              </thead>
-              <tbody>
-                {scenes.map((s, i) => (
-                  <tr key={i}>
-                    <td>{sceneName(s)}</td>
-                    <td>{cueText(s.first_cue)}</td>
-                    <td>{clockTime(s.started_at)}</td>
-                    <td className="num">
-                      {length(s.seconds)}
-                      {!s.ended_at && report.in_progress && ' so far'}
-                    </td>
-                    <td className="num">{s.held_seconds ? length(s.held_seconds) : ''}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </section>
-
-        <section>
-          <h2>Holds</h2>
-          {holds.items.length === 0 ? (
-            <p className="muted">No holds.</p>
-          ) : (
-            <table className="report-table">
-              <thead>
-                <tr>
-                  <th>At</th>
-                  <th className="num">Length</th>
-                  <th>Reason</th>
-                  <th>Cue</th>
-                </tr>
-              </thead>
-              <tbody>
-                {holds.items.map((h, i) => (
-                  <tr key={i}>
-                    <td>{clockTime(h.started_at)}</td>
-                    <td className="num">
-                      {length(h.seconds)}
-                      {!h.resumed_at && ' (not resumed)'}
-                    </td>
-                    <td className="pre">{h.reason}</td>
-                    <td>{cueText(h.cue_number)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </section>
-
-        <section>
-          <div className="row-between">
-            <h2>Performance notes</h2>
-            <div className="report-views no-print" role="group" aria-label="Report view">
-              {[
-                ['working', 'Working view'],
-                ['distributed', 'Distributed'],
-              ].map(([key, label]) => (
-                <button
-                  key={key}
-                  className={`ghost small${view === key ? ' on' : ''}`}
-                  aria-pressed={view === key}
-                  onClick={() => chooseView(key)}
-                >
-                  {label}
+      {scope === 'day' ? (
+        <article className="report-sheet">
+          <DayReport runId={runId} onLoaded={(d) => setDayTitle(d.title)} />
+        </article>
+      ) : (
+        <article className="report-sheet">
+          <header>
+            <p className="report-kicker">Show report</p>
+            <h1>{production.name}</h1>
+            <p className="report-headline">
+              <strong>{report.header.line}</strong>
+              {canEdit && !editingHeader && (
+                <button className="ghost small no-print report-edit-toggle" onClick={() => setEditingHeader(true)}>
+                  Edit
                 </button>
-              ))}
+              )}
+            </p>
+            {report.header.special_label && <p className="report-special">{report.header.special_label}</p>}
+            {editingHeader && (
+              <HeaderEdit
+                runId={runId}
+                run={run}
+                header={report.header}
+                stageManagers={report.stage_managers}
+                onDone={(saved) => {
+                  setEditingHeader(false)
+                  if (saved) refresh()
+                }}
+              />
+            )}
+            <p>
+              {[production.company, production.venue, formatDateRange(production.opening_date, production.closing_date)]
+                .filter(Boolean)
+                .join(' · ')}
+            </p>
+            <p>
+              <strong>{run.label}</strong> · {run.kind}
+            </p>
+            {report.in_progress && <p className="report-warning">Still running: times are up to {when(report.as_of)}.</p>}
+          </header>
+
+          <dl className="report-summary">
+            <dt>Scheduled</dt>
+            <dd>{when(run.scheduled_start)}</dd>
+            <dt>Started</dt>
+            <dd>
+              {run.started_at ? when(run.started_at) : 'Not started'}
+              {late && ` (${late})`}
+            </dd>
+            <dt>Ended</dt>
+            <dd>{run.ended_at ? when(run.ended_at) : 'Still running'}</dd>
+            <dt>Running time</dt>
+            <dd>
+              {length(timing.running_seconds)}
+              {timing.held_in_run_seconds > 0 && ` (${length(timing.held_in_run_seconds)} of it held)`}
+            </dd>
+            <dt>Holds</dt>
+            <dd>
+              {holds.count} {holds.count === 1 ? 'hold' : 'holds'}, {length(holds.total_seconds)} in all
+            </dd>
+            <dt>Cues fired</dt>
+            <dd>{timing.cues_fired}</dd>
+          </dl>
+
+          <ActTimes runId={runId} block={report.acts} canEdit={canEdit} onChanged={refresh} />
+
+          <section>
+            <h2>Scenes</h2>
+            {scenes.length === 0 ? (
+              <p className="muted">No cues fired.</p>
+            ) : (
+              <table className="report-table">
+                <thead>
+                  <tr>
+                    <th>Scene</th>
+                    <th>From</th>
+                    <th>Up</th>
+                    <th className="num">Length</th>
+                    <th className="num">Held</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {scenes.map((s, i) => (
+                    <tr key={i}>
+                      <td>{sceneName(s)}</td>
+                      <td>{cueText(s.first_cue)}</td>
+                      <td>{clockTime(s.started_at)}</td>
+                      <td className="num">
+                        {length(s.seconds)}
+                        {!s.ended_at && report.in_progress && ' so far'}
+                      </td>
+                      <td className="num">{s.held_seconds ? length(s.held_seconds) : ''}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+
+          <section>
+            <h2>Holds</h2>
+            {holds.items.length === 0 ? (
+              <p className="muted">No holds.</p>
+            ) : (
+              <table className="report-table">
+                <thead>
+                  <tr>
+                    <th>At</th>
+                    <th className="num">Length</th>
+                    <th>Reason</th>
+                    <th>Cue</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {holds.items.map((h, i) => (
+                    <tr key={i}>
+                      <td>{clockTime(h.started_at)}</td>
+                      <td className="num">
+                        {length(h.seconds)}
+                        {!h.resumed_at && ' (not resumed)'}
+                      </td>
+                      <td className="pre">{h.reason}</td>
+                      <td>{cueText(h.cue_number)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </section>
+
+          <section>
+            <div className="row-between">
+              <h2>Performance notes</h2>
+              <div className="report-views no-print" role="group" aria-label="Report view">
+                {[
+                  ['working', 'Working view'],
+                  ['distributed', 'Distributed'],
+                ].map(([key, label]) => (
+                  <button
+                    key={key}
+                    className={`ghost small${view === key ? ' on' : ''}`}
+                    aria-pressed={view === key}
+                    onClick={() => chooseView(key)}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
             </div>
-          </div>
-          {view === 'working' ? (
-            <WorkingNotes report={report} canEdit={canEdit} onChanged={refresh} />
-          ) : (
-            <DistributedNotes report={report} />
-          )}
-          {canEdit && (
-            <AddLaterNote
-              runId={runId}
-              cues={cues}
-              sections={report.sections}
-              baseIso={run.started_at ?? run.scheduled_start ?? report.as_of}
-              onAdded={refresh}
-            />
-          )}
-        </section>
+            {view === 'working' ? (
+              <WorkingNotes report={report} canEdit={canEdit} onChanged={refresh} />
+            ) : (
+              <DistributedNotes report={report} />
+            )}
+            {canEdit && (
+              <AddLaterNote
+                runId={runId}
+                cues={cues}
+                sections={report.sections}
+                baseIso={run.started_at ?? run.scheduled_start ?? report.as_of}
+                onAdded={refresh}
+              />
+            )}
+          </section>
 
-        <NextCall runId={runId} call={report.next_call} canEdit={canEdit} onChanged={refresh} />
+          <NextCall runId={runId} call={report.next_call} canEdit={canEdit} onChanged={refresh} />
 
-        <footer className="report-sign-off">
-          {report.stage_managers.names && <p>Stage managers: {report.stage_managers.names}</p>}
-          {report.contacts && <p className="pre muted">{report.contacts}</p>}
-          <p className="muted">Report made {when(report.as_of)}.</p>
-        </footer>
-      </article>
+          <footer className="report-sign-off">
+            {report.stage_managers.names && <p>Stage managers: {report.stage_managers.names}</p>}
+            {report.contacts && <p className="pre muted">{report.contacts}</p>}
+            <p className="muted">Report made {when(report.as_of)}.</p>
+          </footer>
+        </article>
+      )}
     </main>
   )
 }

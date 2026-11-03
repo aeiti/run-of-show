@@ -127,7 +127,7 @@ class ProductionSerializer(serializers.ModelSerializer):
         model = Production
         fields = [
             "id", "name", "company", "venue", "opening_date", "closing_date", "notes", "logo", "note_sections",
-            "call_template", "contacts", "created_at", "owner", "role",
+            "call_template", "contacts", "combined_reports", "created_at", "owner", "role",
         ]
         read_only_fields = ["id", "created_at"]
 
@@ -515,6 +515,9 @@ class ReportEmailSerializer(serializers.Serializer):
     )
     # Print each note's time, run clock and cue, as in the SM's working view.
     stamps = serializers.BooleanField(default=False)
+    # "day" sends one report for every show that day, "show" this run's alone; left
+    # out, the production's setting decides.
+    scope = serializers.ChoiceField(choices=["day", "show"], required=False)
     # Production files to attach, by id: the weekly schedule, say.
     files = serializers.ListField(child=serializers.IntegerField(), max_length=10, required=False, default=list)
 
@@ -547,7 +550,7 @@ class BackupProductionSerializer(serializers.ModelSerializer):
         model = Production
         fields = [
             "name", "company", "venue", "opening_date", "closing_date", "notes", "note_sections", "call_template",
-            "contacts",
+            "contacts", "combined_reports",
         ]
 
     def validate(self, data):
