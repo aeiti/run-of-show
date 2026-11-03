@@ -28,7 +28,7 @@ This runs the database, the API at http://localhost:5600 and the board at http:/
 LAN_HOSTS=adams-macbook-pro.local,192.168.1.241 docker compose up -d
 ```
 
-Then open `http://<one of those>:3200` on the other machine. The board calls the API on port 5600 of whichever host it was loaded from, and `LAN_HOSTS` is what lets Django, the live-update sockets and Vite accept those names. Without it only this machine can use the app. macOS may ask whether to accept incoming connections the first time. This is for a trusted network: it is still the development setup, with `DEBUG` on. The database is only published on `127.0.0.1`.
+Then open `http://<one of those>:3200` on the other machine. The board calls the API on port 5600 of whichever host it was loaded from, and `LAN_HOSTS` is what lets Django, the live-update sockets and Vite accept those names. Without it only this machine can use the app. macOS may ask whether to accept incoming connections the first time. This is for a trusted network: it is still the development setup, with `DEBUG` on. The database is only published on `127.0.0.1`. With `LAN_HOSTS` set, the board's **Link** button (beside **Follow view**) gives the follow view's address on those names rather than `localhost`, so it can go straight to a tablet.
 
 **Or on the host**
 
