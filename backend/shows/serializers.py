@@ -100,6 +100,17 @@ class NoteSectionsField(serializers.ListField):
         return names
 
 
+class CallSerializer(serializers.Serializer):
+    """One line of the next call: what happens, and how many minutes before curtain."""
+
+    minutes = serializers.IntegerField(min_value=0, max_value=24 * 60)
+    label = serializers.CharField(max_length=100)
+
+
+def CallTemplateField(**kwargs):
+    return serializers.ListField(child=CallSerializer(), max_length=20, **kwargs)
+
+
 class ProductionSerializer(serializers.ModelSerializer):
     owner = PersonSerializer(read_only=True)
     # The requesting user's role, so the UI can show only what they may do.
@@ -109,12 +120,14 @@ class ProductionSerializer(serializers.ModelSerializer):
     logo = serializers.SerializerMethodField()
     # The report's note sections, in order. Reads as the defaults until set.
     note_sections = NoteSectionsField(required=False)
+    # The next call's lines before curtain. Reads as the default until set.
+    call_template = CallTemplateField(required=False)
 
     class Meta:
         model = Production
         fields = [
             "id", "name", "company", "venue", "opening_date", "closing_date", "notes", "logo", "note_sections",
-            "created_at", "owner", "role",
+            "call_template", "contacts", "created_at", "owner", "role",
         ]
         read_only_fields = ["id", "created_at"]
 
@@ -123,7 +136,11 @@ class ProductionSerializer(serializers.ModelSerializer):
         return data
 
     def to_representation(self, production):
-        return {**super().to_representation(production), "note_sections": production.sections}
+        return {
+            **super().to_representation(production),
+            "note_sections": production.sections,
+            "call_template": production.calls,
+        }
 
     def get_role(self, production):
         return role_for(production, self.context["request"].user)
@@ -271,8 +288,12 @@ class RunSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Run
-        fields = ["id", "production", "label", "kind", "created_at", "scheduled_start", "started_at", "ended_at"]
+        fields = [
+            "id", "production", "label", "kind", "created_at", "scheduled_start", "started_at", "ended_at",
+            "performance_number", "special_label", "stage_managers", "next_call",
+        ]
         read_only_fields = ["id", "production", "created_at"]
+        extra_kwargs = {"performance_number": {"min_value": 1}}
 
     def validate_started_at(self, value):
         if self.instance is None and value is not None:
@@ -494,6 +515,8 @@ class ReportEmailSerializer(serializers.Serializer):
     )
     # Print each note's time, run clock and cue, as in the SM's working view.
     stamps = serializers.BooleanField(default=False)
+    # Production files to attach, by id: the weekly schedule, say.
+    files = serializers.ListField(child=serializers.IntegerField(), max_length=10, required=False, default=list)
 
     def validate_to(self, addresses):
         # The same address typed twice gets one email.
@@ -518,10 +541,14 @@ class BackupProductionSerializer(serializers.ModelSerializer):
     # is asking, not to the production file.
     # Null (or left out, in older files) for the default note sections.
     note_sections = NoteSectionsField(required=False, allow_null=True)
+    call_template = CallTemplateField(required=False, allow_null=True)
 
     class Meta:
         model = Production
-        fields = ["name", "company", "venue", "opening_date", "closing_date", "notes", "note_sections"]
+        fields = [
+            "name", "company", "venue", "opening_date", "closing_date", "notes", "note_sections", "call_template",
+            "contacts",
+        ]
 
     def validate(self, data):
         check_order(data, None, "opening_date", "closing_date", "The closing date can't be before the opening date.")
@@ -593,8 +620,9 @@ class BackupRunSerializer(serializers.ModelSerializer):
         model = Run
         fields = [
             "label", "kind", "created_at", "scheduled_start", "started_at", "ended_at", "notes", "events", "cue_notes",
-            "acts",
+            "acts", "performance_number", "special_label", "stage_managers", "next_call",
         ]
+        extra_kwargs = {"performance_number": {"min_value": 1}}
 
     def validate(self, data):
         check_order(data, None, "started_at", "ended_at", "A run can't end before it starts.")

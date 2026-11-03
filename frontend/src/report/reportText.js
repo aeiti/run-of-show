@@ -111,3 +111,24 @@ export function actClock(iso) {
   const d = new Date(iso)
   return `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')}`
 }
+
+/** A production's call template as text to edit, one call per line: "45 Wig prep starts". */
+export const formatCallTemplate = (calls) => calls.map((c) => `${c.minutes} ${c.label}`).join('\n')
+
+/**
+ * Typed call template lines back into calls: minutes before curtain, then
+ * what happens. Blank lines are skipped; a line that doesn't start with a
+ * number is returned in ``bad`` so the form can say which.
+ */
+export function parseCallTemplate(text) {
+  const calls = []
+  const bad = []
+  for (const line of text.split('\n')) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    const match = /^(\d+)\s+(.+)$/.exec(trimmed)
+    if (match) calls.push({ minutes: Number(match[1]), label: match[2].trim() })
+    else bad.push(trimmed)
+  }
+  return { calls, bad }
+}

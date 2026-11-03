@@ -23,6 +23,17 @@ from the first act up to the last act down. An act still up lasts until the
 run ended, or until now. A run with no acts marked has no times block; its
 start, end and running time are in the summary.
 
+The header names the performance as the sample reports do ("Evening
+Performance #18 · Tuesday, March 3, 2026 @ 8:00pm"). Performances and
+previews are numbered by counting the production's runs of that kind in date
+order; a number set by hand on a run sets the count, and later runs count on
+from it. A run's date is its scheduled start, else when it started, else when
+it was made. One that starts before 17:00 is a matinee.
+
+The next call is the run's own text if the SM has written one; otherwise it
+is worked out from the next scheduled run and the production's call template.
+The stage managers are the run's, or the previous run's if it has none.
+
 Performance notes are listed in the order they happened (``at``), each with
 where the show was: the run clock (playing time since the start, held time
 left out, as in the scene lengths), the scene, and the hold it was written
@@ -36,13 +47,14 @@ note's time, run clock, cue and scene instead, as in the SM's working view.
 """
 
 from bisect import bisect_right
+from datetime import timedelta
 
 from django.utils import timezone
 from django.utils.html import format_html, format_html_join
 
 from accounts.models import shown_name
 
-from .models import CueEvent, format_number
+from .models import CueEvent, Run, format_number
 
 # The actions that make a cue active. A reset clears it, but the show is
 # still in the same scene until another cue goes.
@@ -191,6 +203,103 @@ def performance_notes(notes, events, scene_of, start, found_holds, until):
     return items
 
 
+NUMBERED = {Run.Kind.PERFORMANCE: "Performance", Run.Kind.PREVIEW: "Preview"}
+REPORT_KINDS = {
+    Run.Kind.PERFORMANCE: "Performance",
+    Run.Kind.PREVIEW: "Preview",
+    Run.Kind.TECH: "Tech",
+    Run.Kind.REHEARSAL: "Rehearsal",
+}
+
+
+def run_date(run):
+    return run.scheduled_start or run.started_at or run.created_at
+
+
+def in_order(runs):
+    return sorted(runs, key=lambda r: (run_date(r), r.id))
+
+
+def performance_numbers(runs):
+    """Run id -> its number, for the performances and previews among ``runs``."""
+    counts, numbers = {}, {}
+    for run in in_order(runs):
+        if run.kind not in NUMBERED:
+            continue
+        counts[run.kind] = run.performance_number or counts.get(run.kind, 0) + 1
+        numbers[run.id] = counts[run.kind]
+    return numbers
+
+
+def day_clock(value):
+    """A time of day as a call sheet prints it: "8:00pm"."""
+    local = timezone.localtime(value)
+    return f"{local.hour % 12 or 12}:{local.minute:02}{'am' if local.hour < 12 else 'pm'}"
+
+
+def long_date(value):
+    local = timezone.localtime(value)
+    return f"{local:%A, %B} {local.day}, {local.year}"
+
+
+def kind_label(run, numbers):
+    """ "Performance #18", "Preview #3", "Tech", "Rehearsal"; a run of another kind has none."""
+    if run.id in numbers:
+        return f"{NUMBERED[run.kind]} #{numbers[run.id]}"
+    return REPORT_KINDS.get(run.kind, "")
+
+
+def header(run, numbers):
+    """What this run is, for the top of the report. Like the next call, it is on
+    the server's clock (settings.TIME_ZONE), which should be the venue's: the
+    page shows it as the email does."""
+    when = run_date(run)
+    curtain = run.scheduled_start or run.started_at
+    session = ""
+    if run.kind in NUMBERED and curtain:
+        session = "Matinee" if timezone.localtime(curtain).hour < 17 else "Evening"
+    title = " ".join(filter(None, [session, kind_label(run, numbers)])) or run.label
+    date = long_date(when) + (f" @ {day_clock(curtain)}" if curtain else "")
+    return {
+        "number": numbers.get(run.id),
+        "title": title,
+        "line": f"{title} · {date}",
+        "special_label": run.special_label,
+        "subject_date": long_date(when),
+    }
+
+
+def generated_next_call(run, runs, numbers, calls):
+    """The next call worked out from the next scheduled run, or "" if none is scheduled."""
+    after = run_date(run)
+    later = sorted(
+        (r for r in runs if r.scheduled_start and r.scheduled_start > after and r.id != run.id),
+        key=lambda r: (r.scheduled_start, r.id),
+    )
+    if not later:
+        return ""
+    following = later[0]
+    day = timezone.localtime(following.scheduled_start).date()
+    that_day = [r for r in later if timezone.localtime(r.scheduled_start).date() == day]
+    lines = [long_date(following.scheduled_start)]
+    if len(that_day) > 1:
+        lines.append(f"({len(that_day)} Performances, First Call)")
+    for call in sorted(calls, key=lambda c: -c["minutes"]):
+        at = following.scheduled_start - timedelta(minutes=call["minutes"])
+        lines.append(f"{day_clock(at)}  {call['label']}")
+    curtain = " – ".join(filter(None, [kind_label(following, numbers) or following.label, following.special_label]))
+    lines.append(f"{day_clock(following.scheduled_start)}  {curtain}")
+    return "\n".join(lines)
+
+
+def stage_managers(run, runs):
+    """The run's stage managers, or the last earlier run's that has them; and whether they came from that run."""
+    if run.stage_managers:
+        return run.stage_managers, False
+    earlier = [r for r in in_order(runs) if (run_date(r), r.id) < (run_date(run), run.id) and r.stage_managers]
+    return (earlier[-1].stage_managers, True) if earlier else ("", False)
+
+
 def build(run, now=None):
     """The report as plain data (datetimes and numbers), ready for a serializer or JSON."""
     production = run.production
@@ -202,6 +311,10 @@ def build(run, now=None):
     spans = [(h["started_at"], h["resumed_at"] or until) for h in found_holds]
     start = run.started_at
     scene_of = scene_lookup(list(production.cues.all()))
+    runs = list(production.runs.all())
+    numbers = performance_numbers(runs)
+    generated = generated_next_call(run, runs, numbers, production.calls)
+    managers, inherited = stage_managers(run, runs)
     return {
         "as_of": as_of,
         "in_progress": run.ended_at is None,
@@ -220,6 +333,10 @@ def build(run, now=None):
             "scheduled_start": run.scheduled_start,
             "started_at": start,
             "ended_at": run.ended_at,
+            # As set by hand; ``header`` and ``stage_managers`` have what the report prints.
+            "performance_number": run.performance_number,
+            "special_label": run.special_label,
+            "stage_managers": run.stage_managers,
         },
         "timing": {
             # Positive when the run went up late.
@@ -241,6 +358,10 @@ def build(run, now=None):
             events, scene_of, start, found_holds, until,
         ),
         "sections": production.sections,
+        "header": header(run, numbers),
+        "next_call": {"text": run.next_call or generated, "generated": generated, "edited": bool(run.next_call)},
+        "stage_managers": {"names": managers, "inherited": inherited},
+        "contacts": production.contacts,
     }
 
 
@@ -281,7 +402,9 @@ def _dates(production):
 
 
 def subject(report):
-    return f"Show report: {report['production']['name']}, {report['run']['label']}"
+    """ "Amadeus Performance Report Tuesday, March 3, 2026", as the sample reports are sent."""
+    kind = REPORT_KINDS.get(report["run"]["kind"], "Show")
+    return f"{report['production']['name']} {kind} Report {report['header']['subject_date']}"
 
 
 def _summary_rows(report):
@@ -412,6 +535,8 @@ def as_text(report, stamps=False):
         subject(report),
         "",
         " · ".join(filter(None, [production["company"], production["venue"], _dates(production)])),
+        report["header"]["line"],
+        *([report["header"]["special_label"]] if report["header"]["special_label"] else []),
         f"{run['label']} ({run['kind']})",
         "",
     ]
@@ -444,6 +569,12 @@ def as_text(report, stamps=False):
         for note in notes:
             lines += _note_lines(note, stamps)
 
+    if report["next_call"]["text"]:
+        lines += ["", "NEXT CALL", report["next_call"]["text"]]
+    if report["stage_managers"]["names"]:
+        lines += ["", f"Stage managers: {report['stage_managers']['names']}"]
+    if report["contacts"]:
+        lines += ["", report["contacts"]]
     lines += ["", f"Report made {_when(report['as_of'])}."]
     return "\n".join(lines) + "\n"
 
@@ -480,8 +611,10 @@ def as_html(report, stamps=False):
     parts = [
         format_html("<h1>{}</h1>", subject(report)),
         format_html(
-            "<p>{}<br>{} ({})</p>",
+            "<p>{}<br><b>{}</b>{}<br>{} ({})</p>",
             " · ".join(filter(None, [production["company"], production["venue"], _dates(production)])),
+            report["header"]["line"],
+            format_html("<br><b>{}</b>", report["header"]["special_label"]) if report["header"]["special_label"] else "",
             run["label"],
             run["kind"],
         ),
@@ -522,5 +655,13 @@ def as_html(report, stamps=False):
         parts.append(format_html("<h2>{}</h2><ul>{}</ul>", section, items) if notes else format_html(
             "<h2>{}</h2><p>Nothing to report.</p>", section
         ))
+    if report["next_call"]["text"]:
+        parts.append(format_html(
+            "<h2>Next call</h2><p style='white-space: pre-wrap'>{}</p>", report["next_call"]["text"]
+        ))
+    if report["stage_managers"]["names"]:
+        parts.append(format_html("<p>Stage managers: {}</p>", report["stage_managers"]["names"]))
+    if report["contacts"]:
+        parts.append(format_html("<p style='white-space: pre-wrap'><small>{}</small></p>", report["contacts"]))
     parts.append(format_html("<p><small>Report made {}.</small></p>", _when(report["as_of"])))
     return "".join(parts)

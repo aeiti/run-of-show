@@ -150,7 +150,9 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+# The venue's time zone (e.g. America/Los_Angeles): the report's headline, matinee or
+# evening, the next call and the email's times are all on this clock.
+TIME_ZONE = os.environ.get('TIME_ZONE') or 'UTC'
 
 USE_I18N = True
 
@@ -194,6 +196,8 @@ if os.environ.get('AWS_STORAGE_BUCKET_NAME'):
 # size as well.
 PRODUCTION_FILE_MAX_SIZE = int(float(os.environ.get('PRODUCTION_FILE_MAX_MB') or 50) * 1024 * 1024)
 PRODUCTION_LOGO_MAX_SIZE = int(float(os.environ.get('PRODUCTION_LOGO_MAX_MB') or 2) * 1024 * 1024)
+# The most a report email may carry in attached production files, all together.
+REPORT_ATTACHMENTS_MAX_SIZE = int(float(os.environ.get('REPORT_ATTACHMENTS_MAX_MB') or 10) * 1024 * 1024)
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
