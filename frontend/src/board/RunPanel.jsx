@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
-import { CueNoteForm, CueNoteItem } from './CueNotes'
+import { CueNoteItem } from './CueNotes'
 import { formatClock } from './playbackSteps'
 import RunTimes from './RunTimes'
 import { formatLogTime, fromLocalInput } from '../dates'
@@ -50,15 +50,11 @@ export default function RunPanel({
   run,
   cues,
   canOperate,
-  noteSections,
-  noteCueNumber,
-  noteRef,
   onSelect,
   onCreate,
   onEnd,
   onUpdate,
   onExport,
-  onAddNote,
   onEditNote,
   onDeleteNote,
 }) {
@@ -174,12 +170,6 @@ export default function RunPanel({
           </div>
         )}
       </div>
-      {run && canOperate && (
-        <CueNoteForm
-          cues={cues}
-          sections={noteSections}
-          defaultNumber={noteCueNumber} disabled={!run} onAdd={onAddNote} inputRef={noteRef} />
-      )}
       <ol className="log">
         {events.length === 0 && notes.length === 0 && consoleEvents.length === 0 && (
           <li className="muted">Nothing fired in this run yet.</li>

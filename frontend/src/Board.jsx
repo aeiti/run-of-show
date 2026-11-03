@@ -14,12 +14,14 @@ import ImportDialog from './board/ImportDialog'
 import ProductionHeader from './board/ProductionHeader'
 import Playback from './board/Playback'
 import RunPanel from './board/RunPanel'
+import { CueNoteForm } from './board/CueNotes'
 import ScriptViewer from './board/ScriptViewer'
 import Transport from './board/Transport'
 import { currentScript } from './board/files'
 import { extraTotal, fadeFor, fadeSeconds, formatSeconds, formatTime, progressFade } from './board/cueTime'
 import { FLASH, LOOK, STATUS, playheadPos } from './board/looks'
 import { cueStates, findByNumber, playheadIndex, sortCues, stepLoad } from './board/state'
+import { scrollCardIntoList } from './board/scroll'
 import { sceneSpans, trackLabels } from './board/track'
 
 gsap.registerPlugin(useGSAP)
@@ -53,6 +55,8 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
   const [files, setFiles] = useState([])
   const [showFiles, setShowFiles] = useState(false)
   const [showScript, setShowScript] = useState(false)
+  // On a narrow screen the run details, log and playback fold away under the controls.
+  const [showMore, setShowMore] = useState(false)
   // No such production, or access to it was lost (the server doesn't say which).
   const [gone, setGone] = useState(false)
 
@@ -264,7 +268,7 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
       const bar = card.querySelector('.cue-fade')
       delete bar.dataset.stopped
       gsap.fromTo(bar, { scaleX: 0 }, { scaleX: 1, duration: fade, ease: 'none' })
-      card.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+      scrollCardIntoList(card, cardRefs.current[index + 1])
     }
   })
 
@@ -686,8 +690,10 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
         {script && showScript && <ScriptViewer file={script} page={scriptPage} />}
 
         <aside className="controls">
-          {live ? (
-            <>
+          {/* GO, the hold and the note box: on a narrow screen these stay put above
+              the cue list while the rest folds away. */}
+          <div className="control-strip">
+            {live && (
               <Transport
                 disabled={busy || playingBack || !run || ended || !canOperate}
                 hold={hold}
@@ -704,6 +710,30 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
                 gotoRef={gotoRef}
                 onAction={act}
               />
+            )}
+            {run && canOperate && (
+              <CueNoteForm
+                cues={cueList}
+                sections={production?.note_sections}
+                defaultNumber={cueList.find((c) => c.id === loadedCue)?.number ?? run?.state.active_number ?? ''}
+                onAdd={addNote}
+                inputRef={noteRef}
+              />
+            )}
+            {error && <p className="error">{error}</p>}
+            <button
+              type="button"
+              className="ghost small wide controls-more-toggle"
+              aria-expanded={showMore}
+              onClick={() => setShowMore(!showMore)}
+            >
+              {showMore ? 'Hide run and log ▴' : 'Run and log ▾'}
+            </button>
+          </div>
+
+          {/* Playing back keeps it open: its stop button is in here. */}
+          <div className={`controls-more${showMore || playingBack ? ' open' : ''}`}>
+            {live ? (
               <Playback
                 key={run?.id}
                 scope={scope}
@@ -715,32 +745,27 @@ export default function Board({ productionId, runId, me, onBack, onSelectRun, on
                 active={playingBack}
                 onActiveChange={setPlayingBack}
               />
-            </>
-          ) : (
-            <p className="muted edit-help">
-              Editing the cue list. Enter or leaving a field saves it; Esc puts it back. The list stays in cue-number
-              order. Switch back to Live to run the show.
-            </p>
-          )}
+            ) : (
+              <p className="muted edit-help">
+                Editing the cue list. Enter or leaving a field saves it; Esc puts it back. The list stays in cue-number
+                order. Switch back to Live to run the show.
+              </p>
+            )}
 
-          <RunPanel
-            runs={runs}
-            run={run}
-            cues={cueList}
-            canOperate={canOperate}
-            noteSections={production?.note_sections}
-            noteCueNumber={cueList.find((c) => c.id === loadedCue)?.number ?? run?.state.active_number ?? ''}
-            noteRef={noteRef}
-            onAddNote={addNote}
-            onEditNote={editNote}
-            onDeleteNote={deleteNote}
-            onSelect={onSelectRun}
-            onCreate={createRun}
-            onEnd={endRun}
-            onUpdate={updateRun}
-            onExport={(id) => api.exportRun(id).catch((e) => setError(e.message))}
-          />
-          {error && <p className="error">{error}</p>}
+            <RunPanel
+              runs={runs}
+              run={run}
+              cues={cueList}
+              canOperate={canOperate}
+              onEditNote={editNote}
+              onDeleteNote={deleteNote}
+              onSelect={onSelectRun}
+              onCreate={createRun}
+              onEnd={endRun}
+              onUpdate={updateRun}
+              onExport={(id) => api.exportRun(id).catch((e) => setError(e.message))}
+            />
+          </div>
         </aside>
       </div>
       {showPeople && (
