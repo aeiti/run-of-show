@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { GENERAL, pickableSections } from '../report/reportText'
 import { findByNumber } from './state'
 
 /**
@@ -8,9 +9,13 @@ import { findByNumber } from './state'
  * no cue in particular. The server stamps the time.
  *
  * The section stays as picked for the next note. In the note box, Alt+1 to
- * Alt+9 pick the production's first nine sections and Alt+0 none.
+ * Alt+9 pick the production's first nine sections and Alt+0 General (none).
+ *
+ * After a save the note box keeps the focus, so notes can be written one
+ * after another. Esc leaves it, and the board's keys work again.
  */
 export function CueNoteForm({ cues, sections = [], defaultNumber, disabled, onAdd, inputRef }) {
+  const choices = pickableSections(sections)
   const [typed, setTyped] = useState(null) // null: follow defaultNumber
   const [text, setText] = useState('')
   const [section, setSection] = useState('')
@@ -22,10 +27,11 @@ export function CueNoteForm({ cues, sections = [], defaultNumber, disabled, onAd
   async function submit(e) {
     e.preventDefault()
     if (!cueOk || !text.trim()) return
-    if (await onAdd(cue?.id ?? null, text.trim(), sections.includes(section) ? section : '')) {
+    if (await onAdd(cue?.id ?? null, text.trim(), choices.includes(section) ? section : '')) {
       setText('')
       setTyped(null)
-      inputRef.current?.blur()
+      // Saved with the button, the focus is there; bring it back for the next note.
+      inputRef.current?.focus()
     }
   }
 
@@ -51,24 +57,24 @@ export function CueNoteForm({ cues, sections = [], defaultNumber, disabled, onAd
           const digit = e.altKey && /^Digit(\d)$/.exec(e.code)?.[1]
           if (!digit) return
           e.preventDefault()
-          setSection(digit === '0' ? '' : (sections[Number(digit) - 1] ?? section))
+          setSection(digit === '0' ? '' : (choices[Number(digit) - 1] ?? section))
         }}
       />
-      {sections.length > 0 && (
+      {choices.length > 0 && (
         <select
           className="note-section"
           aria-label="Section"
-          title="Alt+1 to Alt+9 in the note box pick a section, Alt+0 none"
-          value={sections.includes(section) ? section : ''}
+          title="Alt+1 to Alt+9 in the note box pick a section, Alt+0 General"
+          value={choices.includes(section) ? section : ''}
           onChange={(e) => setSection(e.target.value)}
         >
-          <option value="">No section</option>
-          {sections.map((name) => (
+          <option value="">{GENERAL}</option>
+          {choices.map((name) => (
             <option key={name}>{name}</option>
           ))}
         </select>
       )}
-      <button type="submit" className="ghost" disabled={disabled || !cueOk || !text.trim()} title="N to write a note">
+      <button type="submit" className="ghost" disabled={disabled || !cueOk || !text.trim()} title="N to write a note, Esc to leave the note box">
         Note
       </button>
     </form>

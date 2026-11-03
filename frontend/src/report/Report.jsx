@@ -6,6 +6,8 @@ import { findByNumber } from '../board/state'
 import { formatDateRange } from '../dates'
 import {
   bySection,
+  GENERAL,
+  pickableSections,
   cueText,
   lateness,
   length,
@@ -123,10 +125,17 @@ function PerformanceNote({ note, sections, canEdit, onChanged }) {
       </p>
       {canEdit && (
         <div className="row note-sorting no-print">
-          <select aria-label="Section" value={note.section} onChange={(e) => change({ section: e.target.value })}>
-            <option value="">No section</option>
+          <select
+            aria-label="Section"
+            value={note.section === GENERAL ? '' : note.section}
+            onChange={(e) => change({ section: e.target.value })}
+          >
+            <option value="">{GENERAL}</option>
             {/* A section since taken off the production's list stays pickable for this note. */}
-            {[...sections, ...(note.section && !sections.includes(note.section) ? [note.section] : [])].map((name) => (
+            {[
+              ...pickableSections(sections),
+              ...(note.section && note.section !== GENERAL && !sections.includes(note.section) ? [note.section] : []),
+            ].map((name) => (
               <option key={name}>{name}</option>
             ))}
           </select>
@@ -136,7 +145,7 @@ function PerformanceNote({ note, sections, canEdit, onChanged }) {
           </label>
         </div>
       )}
-      {!canEdit && note.section && <div className="note-stamp">{note.section}</div>}
+      {!canEdit && <div className="note-stamp">{note.section || GENERAL}</div>}
       {draft === null ? (
         <>
           {note.follow_up && (
@@ -230,8 +239,8 @@ function AddLaterNote({ runId, cues, sections, baseIso, onAdded }) {
         />
         <input type="time" aria-label="Time (optional)" value={time} onChange={(e) => setTime(e.target.value)} />
         <select aria-label="Section" value={section} onChange={(e) => setSection(e.target.value)}>
-          <option value="">No section</option>
-          {sections.map((name) => (
+          <option value="">{GENERAL}</option>
+          {pickableSections(sections).map((name) => (
             <option key={name}>{name}</option>
           ))}
         </select>
