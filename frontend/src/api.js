@@ -104,6 +104,7 @@ export async function changePassword(current_password, new_password) {
 
 export const api = {
   me: () => request('/auth/me/'),
+  network: () => request('/network/'),
   updateMe: (data) => request('/auth/me/', { method: 'PATCH', body: data }),
   requestPasswordReset: (email) => request('/auth/password-reset/', { method: 'POST', body: { email } }),
   confirmPasswordReset: (uid, token, new_password) =>

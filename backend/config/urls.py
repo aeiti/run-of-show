@@ -3,6 +3,7 @@ from django.urls import include, path
 from rest_framework.routers import DefaultRouter
 
 from accounts.views import AdminUserViewSet
+from config.views import NetworkView
 from shows.views import (
     ActViewSet,
     CueNoteViewSet,
@@ -26,5 +27,6 @@ router.register("admin/users", AdminUserViewSet, basename="admin-user")
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("api/auth/", include("accounts.urls")),
+    path("api/network/", NetworkView.as_view()),
     path("api/", include(router.urls)),
 ]
