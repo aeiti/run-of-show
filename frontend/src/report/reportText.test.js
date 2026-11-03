@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  actClock,
+  actName,
   bySection,
   cueText,
   lateness,
@@ -119,5 +121,20 @@ describe('timeline', () => {
       { id: 3, at: '2026-03-14T19:30:00Z' },
     ]
     expect(timeline(scenes, holds, notes).map((item) => item.key)).toEqual(['n3', 's0', 'h0', 'n1', 'n2'])
+  })
+})
+
+describe('acts', () => {
+  it('names acts in roman numerals, then plain numbers', () => {
+    expect(actName(1)).toBe('Act I')
+    expect(actName(4)).toBe('Act IV')
+    expect(actName(12)).toBe('Act 12')
+  })
+
+  it('prints a time of day as the sample reports do', () => {
+    expect(actClock(new Date(2026, 2, 14, 20, 7, 41).toISOString())).toBe('8:07')
+    expect(actClock(new Date(2026, 2, 14, 0, 5).toISOString())).toBe('12:05')
+    expect(actClock(new Date(2026, 2, 14, 12, 30).toISOString())).toBe('12:30')
+    expect(actClock(null)).toBe('–')
   })
 })

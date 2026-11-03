@@ -18,7 +18,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from . import services, uploads
-from .models import SHOW_SECTION, Cue, CueEvent, CueNote, Production, Run
+from .models import SHOW_SECTION, Act, Cue, CueEvent, CueNote, Production, Run
 from .serializers import (
     BACKUP_FORMAT,
     BACKUP_VERSION,
@@ -43,7 +43,7 @@ def export_production(production, runs=True):
                 "data": base64.b64encode(f.read()).decode("ascii"),
             }
     if runs:
-        history = production.runs.order_by("created_at", "id").prefetch_related("events__cue", "cue_notes__cue")
+        history = production.runs.order_by("created_at", "id").prefetch_related("events__cue", "cue_notes__cue", "acts")
         data["runs"] = BackupRunSerializer(history, many=True).data
     return data
 
@@ -68,6 +68,7 @@ def import_production(owner, data, **details):
         events = run_data.pop("events", [])
         notes = run_data.pop("cue_notes", [])
         old_notes = run_data.pop("notes", "").strip()
+        acts = run_data.pop("acts", [])
         if "started_at" not in run_data:
             # A version 1 file has no start; as in migration 0012, it was the first GO.
             run_data["started_at"] = first_start(events, run_data.get("ended_at"))
@@ -94,6 +95,7 @@ def import_production(owner, data, **details):
                 note["at"] = created_at
             row = CueNote.objects.create(run=run, cue_id=cue_ids.get(linked), **note)
             CueNote.objects.filter(pk=row.pk).update(created_at=created_at, updated_at=updated_at)
+        Act.objects.bulk_create(Act(run=run, **act) for act in acts)
         if old_notes:
             # As migration 0016 did for runs already in the database.
             CueNote.objects.create(run=run, text=old_notes, added_later=True, section=SHOW_SECTION)

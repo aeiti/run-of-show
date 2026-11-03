@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { Link } from 'react-router'
 import { api } from '../api'
 import { can } from '../access'
 import { findByNumber } from '../board/state'
-import { formatDateRange } from '../dates'
+import { formatDateRange, fromLocalInput, keepSeconds, toLocalInput } from '../dates'
 import {
+  actClock,
+  actName,
   bySection,
   GENERAL,
   pickableSections,
@@ -254,6 +256,124 @@ function AddLaterNote({ runId, cues, sections, baseIso, onAdded }) {
   )
 }
 
+/** One act's times in the editor, or a new act's when ``act`` is null. */
+function ActEditRow({ act, onSave, onDelete }) {
+  const [up, setUp] = useState(toLocalInput(act?.up_at))
+  const [down, setDown] = useState(toLocalInput(act?.down_at))
+
+  async function save(e) {
+    e.preventDefault()
+    const body = {
+      up_at: keepSeconds(act?.up_at, fromLocalInput(up)),
+      down_at: keepSeconds(act?.down_at, fromLocalInput(down)),
+    }
+    if ((await onSave(body)) && !act) {
+      setUp('')
+      setDown('')
+    }
+  }
+
+  return (
+    <form className="row act-edit report-note-form" onSubmit={save}>
+      <span className="act-edit-name">{act ? actName(act.number) : 'New act'}</span>
+      <label>
+        Up
+        <input type="datetime-local" required value={up} onChange={(e) => setUp(e.target.value)} />
+      </label>
+      <label>
+        Down
+        <input type="datetime-local" value={down} onChange={(e) => setDown(e.target.value)} />
+      </label>
+      <button type="submit" className="small" disabled={!up}>
+        {act ? 'Save' : 'Add act'}
+      </button>
+      {act && (
+        <button type="button" className="ghost small" onClick={onDelete}>
+          Delete
+        </button>
+      )}
+    </form>
+  )
+}
+
+/**
+ * The times block a performance report opens with: each act's time up, time
+ * down and length (holds included, held time beside it), the intermission
+ * between acts, and the totals. Operators correct the times or add acts.
+ * A run with no acts leaves it out of the printed report.
+ */
+function ActTimes({ runId, block, canEdit, onChanged }) {
+  const [editing, setEditing] = useState(false)
+  const [error, setError] = useState('')
+
+  async function call(fn) {
+    setError('')
+    try {
+      await fn()
+      onChanged()
+      return true
+    } catch (err) {
+      setError(err.message)
+      return false
+    }
+  }
+
+  const rows = []
+  for (const a of block.items) {
+    const name = actName(a.number)
+    if (a.intermission_before_seconds !== null) rows.push(['Intermission', length(a.intermission_before_seconds)])
+    const held = a.held_seconds ? ` (held ${length(a.held_seconds)})` : ''
+    rows.push(
+      [`${name} up`, actClock(a.up_at)],
+      [`${name} down`, actClock(a.down_at)],
+      [`${name} total`, `${length(a.seconds)}${a.down_at ? '' : ' so far'}${held}`],
+    )
+  }
+  if (block.items.length) {
+    rows.push(['Total (without intermission)', length(block.total_seconds)], ['Show total', length(block.show_seconds)])
+  }
+
+  return (
+    <section className={block.items.length ? '' : 'no-print'}>
+      <div className="row-between">
+        <h2>Acts</h2>
+        {canEdit && (
+          <button className="ghost small no-print report-edit-toggle" onClick={() => setEditing(!editing)}>
+            {editing ? 'Done' : 'Edit times'}
+          </button>
+        )}
+      </div>
+      {editing ? (
+        <>
+          {block.items.map((a) => (
+            <ActEditRow
+              key={`${a.id}-${a.up_at}-${a.down_at}`}
+              act={a}
+              onSave={(data) => call(() => api.updateAct(a.id, data))}
+              onDelete={() => call(() => api.deleteAct(a.id))}
+            />
+          ))}
+          <ActEditRow key={`new-${block.items.length}`} onSave={(data) => call(() => api.addAct(runId, data))} />
+        </>
+      ) : rows.length === 0 ? (
+        <p className="muted">
+          No acts marked.{canEdit && ' Bring acts up and down on the board, flag cues in the editor, or add them here.'}
+        </p>
+      ) : (
+        <dl className="report-summary">
+          {rows.map(([label, value]) => (
+            <Fragment key={label}>
+              <dt>{label}</dt>
+              <dd>{value}</dd>
+            </Fragment>
+          ))}
+        </dl>
+      )}
+      {error && <p className="error no-print">{error}</p>}
+    </section>
+  )
+}
+
 const VIEW_KEY = 'ros-report-view'
 function storedView() {
   try {
@@ -439,6 +559,8 @@ export default function Report({ productionId, runId }) {
           <dt>Cues fired</dt>
           <dd>{timing.cues_fired}</dd>
         </dl>
+
+        <ActTimes runId={runId} block={report.acts} canEdit={canEdit} onChanged={refresh} />
 
         <section>
           <h2>Scenes</h2>

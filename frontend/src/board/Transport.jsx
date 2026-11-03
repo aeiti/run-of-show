@@ -1,14 +1,19 @@
 import { useEffect, useState } from 'react'
 import { formatClock } from './playbackSteps'
+import { actName } from '../report/reportText'
 
 /**
- * GO / BACK / GOTO / RESET, and HOLD / RESUME. The board owns the run and the
- * loaded cue; this only renders the buttons and reports which action was
- * asked for. While the run is held only RESUME is available.
+ * GO / BACK / GOTO / RESET, HOLD / RESUME, and ACT UP / ACT DOWN. The board
+ * owns the run and the loaded cue; this only renders the buttons and reports
+ * which action was asked for. While the run is held only RESUME and the act
+ * button are available.
  */
 export default function Transport({
   disabled,
   hold,
+  act,
+  acts,
+  onAct,
   goLabel,
   canGo,
   canBack,
@@ -71,7 +76,27 @@ export default function Transport({
       </div>
       <p className="muted keys">Space GO · B BACK · G GOTO · N note · ↑↓ load · Esc unload</p>
       <HoldControl hold={hold} disabled={disabled} onAction={onAction} />
+      <ActControl act={act} acts={acts} disabled={disabled} onAct={onAct} />
     </div>
+  )
+}
+
+/**
+ * Brings the next act up, or the one that's up down, with how long it's been
+ * up. Cues flagged "up" or "down" in the editor do the same when they fire.
+ */
+function ActControl({ act, acts, disabled, onAct }) {
+  if (act) {
+    return (
+      <button className="ghost wide act-button up" onClick={() => onAct('down')} disabled={disabled}>
+        {actName(act.number).toUpperCase()} DOWN · <HoldClock since={act.up_at} />
+      </button>
+    )
+  }
+  return (
+    <button className="ghost wide act-button" onClick={() => onAct('up')} disabled={disabled}>
+      {actName((acts ?? 0) + 1).toUpperCase()} UP
+    </button>
   )
 }
 

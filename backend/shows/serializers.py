@@ -15,6 +15,7 @@ from .access import role_for
 from . import uploads
 from .models import (
     FOLLOW_VALIDATOR,
+    Act,
     Cue,
     ConsoleEvent,
     CueEvent,
@@ -218,7 +219,7 @@ class CueSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Cue
-        fields = ["id", "number", "label", "page", "notes", "scene", "time", "down_time", "duration", "follow"]
+        fields = ["id", "number", "label", "page", "notes", "scene", "time", "down_time", "duration", "follow", "act_mark"]
         read_only_fields = ["id"]
 
     def validate_follow(self, value):
@@ -307,12 +308,47 @@ class HoldStateSerializer(serializers.Serializer):
     reason = serializers.CharField()
 
 
+class OpenActSerializer(serializers.Serializer):
+    number = serializers.IntegerField()
+    up_at = serializers.DateTimeField()
+
+
 class RunStateSerializer(serializers.Serializer):
     started_at = serializers.DateTimeField(allow_null=True)
     active_cue = serializers.IntegerField(allow_null=True)
     active_number = CueNumberField(allow_null=True)
     next_cue = serializers.IntegerField(allow_null=True)
     hold = HoldStateSerializer(allow_null=True)
+    # The act that is up, and how many acts the run has had.
+    act = OpenActSerializer(allow_null=True)
+    acts = serializers.IntegerField()
+
+
+class ActSerializer(serializers.ModelSerializer):
+    """An act's times, as recorded or corrected. A new act takes the next number,
+    and acts can't overlap: each goes up after the one before came down."""
+
+    class Meta:
+        model = Act
+        fields = ["id", "run", "number", "up_at", "down_at"]
+        read_only_fields = ["id", "run", "number"]
+
+    def validate(self, data):
+        check_order(data, self.instance, "up_at", "down_at", "An act can't come down before it goes up.")
+        if self.instance is not None:
+            run, number = self.instance.run, self.instance.number
+        else:
+            run, number = self.context["run"], None
+        up = data.get("up_at", getattr(self.instance, "up_at", None))
+        down = data.get("down_at", getattr(self.instance, "down_at", None))
+        others = run.acts.exclude(pk=getattr(self.instance, "pk", None))
+        before = others.filter(number__lt=number).last() if number else others.last()
+        after = others.filter(number__gt=number).first() if number else None
+        if before is not None and (before.down_at is None or up < before.down_at):
+            raise serializers.ValidationError({"up_at": f"Act {before.number} is still up then."})
+        if after is not None and (down is None or down > after.up_at):
+            raise serializers.ValidationError({"down_at": f"Act {after.number} is up by then."})
+        return data
 
 
 class CueNoteSerializer(serializers.ModelSerializer):
@@ -387,10 +423,11 @@ class RunDetailSerializer(RunSerializer):
     events = CueEventSerializer(many=True, read_only=True)
     cue_notes = CueNoteSerializer(many=True, read_only=True)
     console_events = ConsoleEventSerializer(many=True, read_only=True)
+    acts = ActSerializer(many=True, read_only=True)
     state = serializers.SerializerMethodField()
 
     class Meta(RunSerializer.Meta):
-        fields = RunSerializer.Meta.fields + ["events", "cue_notes", "console_events", "state"]
+        fields = RunSerializer.Meta.fields + ["events", "cue_notes", "console_events", "acts", "state"]
 
     def get_state(self, run):
         return RunStateSerializer(run_state(run)).data
@@ -532,19 +569,38 @@ class BackupCueNoteSerializer(serializers.ModelSerializer):
         ]
 
 
+class BackupActSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Act
+        fields = ["number", "up_at", "down_at"]
+        # Numbers are checked across the run in BackupRunSerializer.
+        validators = []
+
+    def validate(self, data):
+        check_order(data, None, "up_at", "down_at", "An act can't come down before it goes up.")
+        return data
+
+
 class BackupRunSerializer(serializers.ModelSerializer):
     created_at = serializers.DateTimeField()
     events = BackupEventSerializer(many=True, required=False)
     cue_notes = BackupCueNoteSerializer(many=True, required=False)
+    acts = BackupActSerializer(many=True, required=False)
     # Only in files from before migration 0016; the import makes it a note in the Show section.
     notes = serializers.CharField(required=False, allow_blank=True, write_only=True)
 
     class Meta:
         model = Run
-        fields = ["label", "kind", "created_at", "scheduled_start", "started_at", "ended_at", "notes", "events", "cue_notes"]
+        fields = [
+            "label", "kind", "created_at", "scheduled_start", "started_at", "ended_at", "notes", "events", "cue_notes",
+            "acts",
+        ]
 
     def validate(self, data):
         check_order(data, None, "started_at", "ended_at", "A run can't end before it starts.")
+        repeated = repeats(str(act["number"]) for act in data.get("acts", []))
+        if repeated:
+            raise serializers.ValidationError({"acts": f"Act {repeated} appears more than once."})
         return data
 
 

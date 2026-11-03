@@ -99,3 +99,15 @@ export function timeline(scenes, holds, notes) {
   const untimed = notes.filter((n) => !n.at).map((note) => ({ kind: 'note', key: `n${note.id}`, at: null, note }))
   return [...timed, ...untimed]
 }
+
+const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X']
+
+/** "Act I", "Act II", …; past ten, the number. */
+export const actName = (number) => `Act ${ROMAN[number] ?? number}`
+
+/** A time of day as a performance report prints it: 12-hour, no seconds ("8:07"), or "–". */
+export function actClock(iso) {
+  if (!iso) return '–'
+  const d = new Date(iso)
+  return `${d.getHours() % 12 || 12}:${String(d.getMinutes()).padStart(2, '0')}`
+}
