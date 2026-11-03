@@ -262,6 +262,7 @@ def header(run, numbers):
     date = long_date(when) + (f" @ {day_clock(curtain)}" if curtain else "")
     return {
         "number": numbers.get(run.id),
+        "session": session,
         "title": title,
         "line": f"{title} · {date}",
         "special_label": run.special_label,
@@ -298,6 +299,16 @@ def stage_managers(run, runs):
         return run.stage_managers, False
     earlier = [r for r in in_order(runs) if (run_date(r), r.id) < (run_date(run), run.id) and r.stage_managers]
     return (earlier[-1].stage_managers, True) if earlier else ("", False)
+
+
+def same_day(run, runs):
+    """The shows on ``run``'s day, in order: the production's performances and
+    previews on the same date (on the server's clock). Just ``run`` if it is
+    neither a performance nor a preview."""
+    if run.kind not in NUMBERED:
+        return [run]
+    day = timezone.localtime(run_date(run)).date()
+    return in_order(r for r in runs if r.kind in NUMBERED and timezone.localtime(run_date(r)).date() == day)
 
 
 def build(run, now=None):
@@ -362,6 +373,49 @@ def build(run, now=None):
         "next_call": {"text": run.next_call or generated, "generated": generated, "edited": bool(run.next_call)},
         "stage_managers": {"names": managers, "inherited": inherited},
         "contacts": production.contacts,
+        # The day's shows, when there is more than one, and whether the production
+        # sends one report for them all (``build_day``).
+        "day": {
+            "shows": [{"id": r.id, "title": header(r, numbers)["title"]} for r in day],
+            "combined": production.combined_reports,
+        } if len(day := same_day(run, runs)) > 1 else None,
+    }
+
+
+def _numbers(numbers):
+    listed = [str(n) for n in numbers]
+    return listed[0] if len(listed) == 1 else f"{', '.join(listed[:-1])} & {listed[-1]}"
+
+
+def build_day(runs, now=None):
+    """One report for a day's shows (``same_day``), as most sample reports do on
+    a two-show day: each show keeps its own times and notes, under one header,
+    with the last show's next call and one sign-off."""
+    as_of = now or timezone.now()
+    shows = [build(run, as_of) for run in runs]
+    first, last = shows[0], shows[-1]
+    kinds = {show["run"]["kind"] for show in shows}
+    numbers = [show["header"]["number"] for show in shows]
+    if len(kinds) == 1 and all(numbers):
+        title = f"{NUMBERED[first['run']['kind']]} #{_numbers(numbers)}"
+    else:
+        title = " & ".join(show["header"]["title"] for show in shows)
+    managers = list(dict.fromkeys(show["stage_managers"]["names"] for show in shows if show["stage_managers"]["names"]))
+    if len(managers) > 1:
+        managers = [f"{show['header']['title']}: {show['stage_managers']['names']}" for show in shows]
+    return {
+        "as_of": as_of,
+        "in_progress": any(show["in_progress"] for show in shows),
+        "production": last["production"],
+        "kind": first["run"]["kind"],
+        "title": title,
+        "date": first["header"]["subject_date"],
+        "special_labels": [show["header"]["special_label"] for show in shows if show["header"]["special_label"]],
+        "shows": shows,
+        "sections": last["sections"],
+        "next_call": last["next_call"],
+        "stage_managers": "; ".join(managers),
+        "contacts": last["contacts"],
     }
 
 
@@ -405,6 +459,11 @@ def subject(report):
     """ "Amadeus Performance Report Tuesday, March 3, 2026", as the sample reports are sent."""
     kind = REPORT_KINDS.get(report["run"]["kind"], "Show")
     return f"{report['production']['name']} {kind} Report {report['header']['subject_date']}"
+
+
+def subject_day(day):
+    kind = REPORT_KINDS.get(day["kind"], "Show")
+    return f"{day['production']['name']} {kind} Report {day['date']}"
 
 
 def _summary_rows(report):
@@ -664,4 +723,125 @@ def as_html(report, stamps=False):
     if report["contacts"]:
         parts.append(format_html("<p style='white-space: pre-wrap'><small>{}</small></p>", report["contacts"]))
     parts.append(format_html("<p><small>Report made {}.</small></p>", _when(report["as_of"])))
+    return "".join(parts)
+
+
+# The combined report for a day's shows (``build_day``).
+
+
+def day_sections(day):
+    """(section, [(show, notes)]) pairs: each section with every show's notes in it,
+    in the order ``by_section`` gives for one show."""
+    per_show = [dict(by_section(show)) for show in day["shows"]]
+    names = list(day["sections"])
+    for groups in per_show:
+        names += [name for name in groups if name not in names and name != GENERAL]
+    if any(GENERAL in groups for groups in per_show) and GENERAL not in names:
+        names.append(GENERAL)
+    return [(name, [(show, groups.get(name, [])) for show, groups in zip(day["shows"], per_show)]) for name in names]
+
+
+def _day_rows(show):
+    """One show's summary and acts for the day's report: times of day only, since the
+    header gives the date."""
+    run, timing, held = show["run"], show["timing"], show["holds"]
+    late = _late(timing["late_seconds"])
+    started = day_clock(run["started_at"]) if run["started_at"] else "–"
+    running = clock(timing["running_seconds"])
+    if show["in_progress"] and timing["running_seconds"] is not None:
+        running += " so far"
+    return [
+        ("Scheduled", day_clock(run["scheduled_start"]) if run["scheduled_start"] else "–"),
+        ("Started", f"{started} ({late})" if late and run["started_at"] else started),
+        ("Ended", day_clock(run["ended_at"]) if run["ended_at"] else "Still running"),
+        ("Running time", running),
+        ("Holds", f"{held['count']}, {clock(held['total_seconds'])} in all"),
+    ] + act_rows(show)
+
+
+def times_table(day):
+    """(label, [value per show]) rows, the shows' summaries and acts side by side."""
+    columns = [dict(_day_rows(show)) for show in day["shows"]]
+    labels = []
+    for show in day["shows"]:
+        labels += [label for label, _ in _day_rows(show) if label not in labels]
+    return [(label, [column.get(label, "") for column in columns]) for label in labels]
+
+
+def as_text_day(day, stamps=False):
+    production = day["production"]
+    lines = [
+        subject_day(day),
+        "",
+        " · ".join(filter(None, [production["company"], production["venue"], _dates(production)])),
+        f"{day['title']} · {day['date']}",
+        *day["special_labels"],
+    ]
+    for show in day["shows"]:
+        lines += ["", show["header"]["title"].upper()]
+        lines += [f"  {label}: {value}" for label, value in _day_rows(show)]
+    for section, entries in day_sections(day):
+        lines += ["", section.upper()]
+        if not any(notes for _, notes in entries):
+            lines.append("  Nothing to report.")
+            continue
+        for show, notes in entries:
+            lines.append(f"  {show['header']['title']}:")
+            if not notes:
+                lines.append("    None.")
+            for note in notes:
+                lines += [f"  {line}" for line in _note_lines(note, stamps)]
+    if day["next_call"]["text"]:
+        lines += ["", "NEXT CALL", day["next_call"]["text"]]
+    if day["stage_managers"]:
+        lines += ["", f"Stage managers: {day['stage_managers']}"]
+    if day["contacts"]:
+        lines += ["", day["contacts"]]
+    lines += ["", f"Report made {_when(day['as_of'])}."]
+    return "\n".join(lines) + "\n"
+
+
+def as_html_day(day, stamps=False):
+    """The combined report as simple HTML, the shows' times side by side. Every value is escaped."""
+    production = day["production"]
+    parts = [
+        format_html("<h1>{}</h1>", subject_day(day)),
+        format_html(
+            "<p>{}<br><b>{} · {}</b>{}</p>",
+            " · ".join(filter(None, [production["company"], production["venue"], _dates(production)])),
+            day["title"],
+            day["date"],
+            format_html_join("", "<br><b>{}</b>", ((label,) for label in day["special_labels"])),
+        ),
+        format_html(
+            "<table><tr><th></th>{}</tr>{}</table>",
+            format_html_join("", "<th align='left'>{}</th>", ((show["header"]["title"],) for show in day["shows"])),
+            format_html_join(
+                "",
+                "<tr><th align='left'>{}</th>{}</tr>",
+                (
+                    (label, format_html_join("", "<td>{}</td>", ((value,) for value in values)))
+                    for label, values in times_table(day)
+                ),
+            ),
+        ),
+    ]
+    for section, entries in day_sections(day):
+        if not any(notes for _, notes in entries):
+            parts.append(format_html("<h2>{}</h2><p>Nothing to report.</p>", section))
+            continue
+        shows = []
+        for show, notes in entries:
+            items = format_html_join("", "{}", ((_note_html(n, stamps),) for n in notes))
+            shows.append(format_html("<p><i>{}:</i></p><ul>{}</ul>", show["header"]["title"], items) if notes else format_html(
+                "<p><i>{}:</i> None.</p>", show["header"]["title"]
+            ))
+        parts.append(format_html("<h2>{}</h2>{}", section, format_html_join("", "{}", ((part,) for part in shows))))
+    if day["next_call"]["text"]:
+        parts.append(format_html("<h2>Next call</h2><p style='white-space: pre-wrap'>{}</p>", day["next_call"]["text"]))
+    if day["stage_managers"]:
+        parts.append(format_html("<p>Stage managers: {}</p>", day["stage_managers"]))
+    if day["contacts"]:
+        parts.append(format_html("<p style='white-space: pre-wrap'><small>{}</small></p>", day["contacts"]))
+    parts.append(format_html("<p><small>Report made {}.</small></p>", _when(day["as_of"])))
     return "".join(parts)

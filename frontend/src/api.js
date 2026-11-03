@@ -195,8 +195,11 @@ export const api = {
   endRun: (runId) => request(`/runs/${runId}/end/`, { method: 'POST' }),
   // The show report (shows/report.py); emailing it takes a list of addresses.
   report: (runId) => request(`/runs/${runId}/report/`),
-  emailReport: (runId, to, stamps = false, files = []) =>
-    request(`/runs/${runId}/report/email/`, { method: 'POST', body: { to, stamps, files } }),
+  // One report for every performance or preview on the run's day.
+  dayReport: (runId) => request(`/runs/${runId}/report/day/`),
+  // scope is "day" or "show"; left out, the production's setting decides.
+  emailReport: (runId, to, stamps = false, files = [], scope) =>
+    request(`/runs/${runId}/report/email/`, { method: 'POST', body: { to, stamps, files, ...(scope && { scope }) } }),
   // body is FormData with file or text, mode, list and dry_run.
   importCues: (id, form) => request(`/productions/${id}/cues/import/`, { method: 'POST', body: form }),
   exportCues: (id) => download(`/productions/${id}/cues/export/`),

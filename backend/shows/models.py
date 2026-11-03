@@ -63,6 +63,9 @@ class Production(models.Model):
     call_template = models.JSONField(null=True, blank=True)
     # The stage managers' contact details, printed at the foot of the report.
     contacts = models.TextField(blank=True, default="", db_default="")
+    # On a day with two or more performances (or previews), one report covers them all.
+    # Off, each show gets its own report.
+    combined_reports = models.BooleanField(default=True, db_default=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
