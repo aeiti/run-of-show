@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  formatCallTemplate,
+  parseCallTemplate,
   actClock,
   actName,
   bySection,
@@ -136,5 +138,27 @@ describe('acts', () => {
     expect(actClock(new Date(2026, 2, 14, 0, 5).toISOString())).toBe('12:05')
     expect(actClock(new Date(2026, 2, 14, 12, 30).toISOString())).toBe('12:30')
     expect(actClock(null)).toBe('–')
+  })
+})
+
+describe('call template', () => {
+  it('reads one call per line as minutes before curtain and a label', () => {
+    expect(parseCallTemplate('45 Wig prep starts\n\n 30  Half hour – House open \n')).toEqual({
+      calls: [
+        { minutes: 45, label: 'Wig prep starts' },
+        { minutes: 30, label: 'Half hour – House open' },
+      ],
+      bad: [],
+    })
+    expect(parseCallTemplate('Half hour\n90 Crew call').bad).toEqual(['Half hour'])
+  })
+
+  it('writes calls back as the same lines', () => {
+    const calls = [
+      { minutes: 90, label: 'Crew call' },
+      { minutes: 30, label: 'Half hour' },
+    ]
+    expect(formatCallTemplate(calls)).toBe('90 Crew call\n30 Half hour')
+    expect(parseCallTemplate(formatCallTemplate(calls)).calls).toEqual(calls)
   })
 })

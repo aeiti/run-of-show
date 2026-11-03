@@ -29,6 +29,8 @@ services:
       # Set LAN_HOSTS (in a .env file beside this one, or the shell) to use the
       # board from other machines, e.g. LAN_HOSTS=adams-macbook-pro.local,192.168.1.241
       LAN_HOSTS: ${LAN_HOSTS:-}
+      # The venue's time zone for the report and its email, e.g. TIME_ZONE=America/Los_Angeles. UTC if unset.
+      TIME_ZONE: ${TIME_ZONE:-}
     ports:
       - "5600:5600"
       # Eos console listeners (shows/console.py): ETC's recommended UDP range.
