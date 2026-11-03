@@ -8,8 +8,9 @@ read from. Each cue the console fires is recorded on the production's open run
 This runs in the server process because the channel layer is in memory: only
 this process can reach the boards' sockets, and so only it can tell them about
 a cue straight away. Daphne has no startup hook, so the listeners start on the
-first request or socket the server handles, which an open board makes within
-seconds of a restart. Saving a production's settings restarts its listener.
+first request or socket the server handles. The server makes that request to
+itself as soon as it is up (``startup.py``), so they start with it, board or
+no board. Saving a production's settings restarts its listener.
 
 Each listener keeps a status that boards show next to "Synced": off, listening,
 connecting, connected or a problem, when the console was last heard from, and

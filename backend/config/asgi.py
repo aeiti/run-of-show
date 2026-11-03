@@ -34,7 +34,8 @@ router = ProtocolTypeRouter(
 
 async def application(scope, receive, send):
     # Daphne has no startup hook, so the Eos console listeners start with the
-    # first request or socket (see shows/console.py).
+    # first request or socket (see shows/console.py). The server sends itself
+    # that first request as soon as it is up (shows/startup.py).
     if settings.EOS_LISTENERS and scope["type"] in ("http", "websocket"):
         supervisor.ensure_started()
     await router(scope, receive, send)
