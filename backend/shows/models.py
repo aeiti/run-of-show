@@ -36,6 +36,12 @@ DEFAULT_NOTE_SECTIONS = (
 # Where the old free-text run notes went (migration 0016), and notes from an older backup.
 SHOW_SECTION = "Show"
 
+# The calls before curtain the next call lists, for a production that hasn't
+# set its own: minutes before curtain and what happens then.
+DEFAULT_CALL_TEMPLATE = (
+    {"minutes": 30, "label": "Half hour – House open"},
+)
+
 
 class Production(models.Model):
     owner = models.ForeignKey(
@@ -52,6 +58,11 @@ class Production(models.Model):
     logo = models.FileField(upload_to=production_logo_path, blank=True, max_length=500)
     # The report's note sections, in order; null for DEFAULT_NOTE_SECTIONS.
     note_sections = models.JSONField(null=True, blank=True)
+    # The next call's lines before curtain, [{"minutes": 30, "label": "Half hour"}, ...];
+    # null for DEFAULT_CALL_TEMPLATE.
+    call_template = models.JSONField(null=True, blank=True)
+    # The stage managers' contact details, printed at the foot of the report.
+    contacts = models.TextField(blank=True, default="", db_default="")
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
@@ -71,6 +82,10 @@ class Production(models.Model):
     @property
     def sections(self):
         return list(DEFAULT_NOTE_SECTIONS if self.note_sections is None else self.note_sections)
+
+    @property
+    def calls(self):
+        return [dict(c) for c in (DEFAULT_CALL_TEMPLATE if self.call_template is None else self.call_template)]
 
 
 @receiver(post_delete, sender=Production)
@@ -226,6 +241,15 @@ class Run(models.Model):
     # note. Kept, with a database default, so checkouts still on older code can
     # read and write runs; drop it in a later migration.
     notes = models.TextField(blank=True, db_default="")
+    # For the report. A performance or preview is numbered by counting the
+    # production's runs of its kind in date order; ``performance_number`` sets
+    # it by hand, and later runs count on from it.
+    performance_number = models.PositiveIntegerField(null=True, blank=True)
+    special_label = models.CharField(max_length=200, blank=True, default="", db_default="")
+    # Empty: the previous run's stage managers.
+    stage_managers = models.CharField(max_length=500, blank=True, default="", db_default="")
+    # Empty: worked out from the next scheduled run and the production's call template.
+    next_call = models.TextField(blank=True, default="", db_default="")
 
     class Meta:
         # Newest record first. Not by scheduled start: runs booked ahead of

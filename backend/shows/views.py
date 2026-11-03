@@ -16,6 +16,7 @@ from .access import ProductionRole, visible_productions
 from .console import supervisor
 from .models import Act, Cue, CueNote, EosConsole, Membership, Production, ProductionFile, Run
 from .serializers import (
+    megabytes,
     ActSerializer,
     CueEventSerializer,
     CueNoteSerializer,
@@ -447,11 +448,25 @@ class RunViewSet(LiveUpdates, mixins.RetrieveModelMixin, mixins.UpdateModelMixin
 
     @action(detail=True, methods=["post"], url_path="report/email", throttle_scope="report_email")
     def email_report(self, request, pk=None):
-        """Email the report, as text and HTML, to ``to`` (a list of addresses). One email each."""
+        """Email the report, as text and HTML, to ``to`` (a list of addresses). One email each.
+        ``files`` are ids of this production's files to attach, up to REPORT_ATTACHMENTS_MAX_SIZE in all."""
         run = self.get_object()
         body = ReportEmailSerializer(data=request.data)
         body.is_valid(raise_exception=True)
         to = body.validated_data["to"]
+        wanted = set(body.validated_data["files"])
+        files = list(ProductionFile.objects.filter(production=run.production_id, pk__in=wanted))
+        if len(files) != len(wanted):
+            return Response({"files": ["That file is not in this production."]}, status=status.HTTP_400_BAD_REQUEST)
+        if sum(f.size for f in files) > settings.REPORT_ATTACHMENTS_MAX_SIZE:
+            limit = megabytes(settings.REPORT_ATTACHMENTS_MAX_SIZE)
+            return Response(
+                {"files": [f"Attachments can come to {limit} MB at most."]}, status=status.HTTP_400_BAD_REQUEST
+            )
+        attachments = []
+        for f in files:
+            with f.file.open("rb") as stored:
+                attachments.append((f.name, stored.read(), f.content_type))
 
         built = report.build(run)
         stamps = body.validated_data["stamps"]
@@ -461,6 +476,8 @@ class RunViewSet(LiveUpdates, mixins.RetrieveModelMixin, mixins.UpdateModelMixin
         for address in to:
             message = EmailMultiAlternatives(subject, text, settings.DEFAULT_FROM_EMAIL, [address], reply_to=reply_to)
             message.attach_alternative(html, "text/html")
+            for attachment in attachments:
+                message.attach(*attachment)
             messages.append(message)
         get_connection().send_messages(messages)
         return Response({"sent": len(messages), "to": to})

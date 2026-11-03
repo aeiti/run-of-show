@@ -130,6 +130,7 @@ export async function changePassword(current_password, new_password) {
 
 export const api = {
   me: () => request('/auth/me/'),
+  network: () => request('/network/'),
   updateMe: (data) => request('/auth/me/', { method: 'PATCH', body: data }),
   requestPasswordReset: (email) => request('/auth/password-reset/', { method: 'POST', body: { email } }),
   confirmPasswordReset: (uid, token, new_password) =>
@@ -194,8 +195,8 @@ export const api = {
   endRun: (runId) => request(`/runs/${runId}/end/`, { method: 'POST' }),
   // The show report (shows/report.py); emailing it takes a list of addresses.
   report: (runId) => request(`/runs/${runId}/report/`),
-  emailReport: (runId, to, stamps = false) =>
-    request(`/runs/${runId}/report/email/`, { method: 'POST', body: { to, stamps } }),
+  emailReport: (runId, to, stamps = false, files = []) =>
+    request(`/runs/${runId}/report/email/`, { method: 'POST', body: { to, stamps, files } }),
   // body is FormData with file or text, mode, list and dry_run.
   importCues: (id, form) => request(`/productions/${id}/cues/import/`, { method: 'POST', body: form }),
   exportCues: (id) => download(`/productions/${id}/cues/export/`),

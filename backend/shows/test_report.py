@@ -357,7 +357,7 @@ def test_the_email_carries_the_report_as_text_and_html(show):
     # One email each, so recipients don't see each other's addresses.
     assert [m.to for m in mail.outbox] == [["sm@example.com"], ["lx@example.com"]]
     message = mail.outbox[0]
-    assert message.subject == "Show report: Show A, Preview 1"
+    assert message.subject == "Show A Preview Report Saturday, March 14, 2026"
     assert message.reply_to == ["alice@example.com"]
     text = message.body
     for expected in [
